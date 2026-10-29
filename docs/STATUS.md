@@ -82,6 +82,17 @@
 - Pound: https://github.com/pound-emu/pound — Switch-family architecture
   research and Ballistic CPU JIT effort; no published Switch 2 game run.
 
+## First native-facing independent research target (host-only)
+
+A pinned HBLauncher SDK v3 source revision and original host/QEMU AArch64
+trampoline/runtime tests have a **reproducible opt-in CI lane**.
+NX2 independently validates the frozen custom HBX context layout and
+18 malformed or mutated ABI negatives. This is a *third-party host test
+reproduction*, not an NX2 emulator executing HBLauncher, not Nintendo
+Horizon ABI, and not a physical console observation. Accept it as a host-only result **only when** exact-head pinned CI passes;
+never promote it to real Switch 2 execution. See
+[research intake](research/hblauncher_host_abi_2026-10-29.md).
+
 ## Strategic direction (October 29)
 
 [Evidence-first strategy](STRATEGY_2026-10-29.md) makes a cross-project

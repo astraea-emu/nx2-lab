@@ -1,0 +1,63 @@
+name: C1 pinned HBLauncher ARM64 ABI intake (host only)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/c1-hblauncher-abi.yml'
+      - 'tools/reference/hblauncher/**'
+      - 'docs/research/hblauncher_host_abi_2026-10-29.md'
+permissions:
+  contents: read
+jobs:
+  pinned-native-sdk-abi:
+    name: Pinned external HBX AArch64 host ABI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host-only AArch64 test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            qemu-user python3 git
+      - name: Freeze external source and license at reviewed revision
+        env:
+          HBX_REV: 18b4748ba98eeac7df17beb5d3418985eb74897c
+        run: |
+          set -euo pipefail
+          git clone https://github.com/ravensclawx/HBLauncher.git "$RUNNER_TEMP/hblauncher"
+          git -C "$RUNNER_TEMP/hblauncher" checkout --detach "$HBX_REV"
+          test "$(git -C "$RUNNER_TEMP/hblauncher" rev-parse HEAD)" = "$HBX_REV"
+          test -z "$(git -C "$RUNNER_TEMP/hblauncher" status --porcelain)"
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object sdk/abi.json)" = c143bba98182d22240bfbc692ebc2dbaa3059c9d
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object tests/abi/build.sh)" = 14223d3f57049a4bf40ae80f2708fcaa6fdbd1e0
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object tests/abi/entry_aarch64.S)" = 2bad3fdd64b8461ff521d7aaff485e7d69e30c34
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object apps/hello-cpu/src/app.c)" = 0513fa7d0b333ffdde2ee985f65900ee7f8f7e65
+          grep -Fxq 'MIT License' "$RUNNER_TEMP/hblauncher/LICENSE"
+          echo "HBX_PINNED_SOURCE_PASS"
+      - name: Reproduce independently authored host and QEMU AArch64 tests
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hblauncher"
+          sh tests/abi/build.sh | tee "$RUNNER_TEMP/hbx-upstream-abi.txt"
+          grep -Fx 'qemu-aarch64 runtime tests passed' "$RUNNER_TEMP/hbx-upstream-abi.txt"
+          grep -Fx 'entry trampoline test passed' "$RUNNER_TEMP/hbx-upstream-abi.txt"
+          echo "HBX_EXTERNAL_QEMU_ABI_PASS"
+      - name: Independently verify versioned custom HBX ABI and mutation negatives
+        env:
+          HBX_REV: 18b4748ba98eeac7df17beb5d3418985eb74897c
+        run: |
+          set -euo pipefail
+          python3 tools/reference/hblauncher/verify_abi.py \
+            --abi "$RUNNER_TEMP/hblauncher/sdk/abi.json" \
+            --source-revision "$HBX_REV" \
+            | tee "$RUNNER_TEMP/hbx-abi-report.txt"
+          for required in \
+            'NX2_HBX_HOST_ABI_CONTRACT_PASS' \
+            'hbx_abi_version=3' \
+            'hbx_contract_negative_cases=18' \
+            'console_observations=0'; do
+            grep -Fx "$required" "$RUNNER_TEMP/hbx-abi-report.txt"
+          done
+          echo "HBX_HOST_ONLY_NO_HORIZON_CLAIM"
