@@ -1,0 +1,52 @@
+name: E1 pinned Dynarmic research (Linux)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/e1-dynarmic-research.yml'
+      - 'tools/reference/dynarmic/**'
+      - 'src/cpu.cpp'
+      - 'src/memory.cpp'
+      - 'include/nx2/**'
+permissions:
+  contents: read
+jobs:
+  owned-aarch64-compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install source-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build git libboost-dev clang
+      - name: Freeze external Dynarmic at reviewed exact commit
+        env:
+          DYNARMIC_SHA: a46601580d5512d324104f985b5f0209dc980ddc
+        run: |
+          set -euo pipefail
+          git clone https://github.com/azahar-emu/dynarmic.git "$RUNNER_TEMP/dynarmic"
+          git -C "$RUNNER_TEMP/dynarmic" checkout --detach "$DYNARMIC_SHA"
+          test "$(git -C "$RUNNER_TEMP/dynarmic" rev-parse HEAD)" = "$DYNARMIC_SHA"
+          test -z "$(git -C "$RUNNER_TEMP/dynarmic" status --porcelain)"
+          grep -Fq 'SPDX-License-Identifier: 0BSD' "$RUNNER_TEMP/dynarmic/src/dynarmic/interface/A64/a64.h"
+      - name: Configure research-only backend comparison
+        run: |
+          cmake -S tools/reference/dynarmic -B "$RUNNER_TEMP/nx2-e1-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DNX2_PINNED_DYNARMIC_SOURCE="$RUNNER_TEMP/dynarmic"
+      - name: Build and compare original AArch64 instruction prefixes
+        run: |
+          cmake --build "$RUNNER_TEMP/nx2-e1-build" --target nx2_dynarmic_owned_trace --parallel 2
+          "$RUNNER_TEMP/nx2-e1-build/nx2_dynarmic_owned_trace" | tee "$RUNNER_TEMP/nx2-e1-results.txt"
+          for claim in \
+            'NX2_DYNARMIC_OWNED_TRACE_PASS' \
+            'original_instruction_prefixes=3_and_4' \
+            'source_owned_guest_memory_readback=checked' \
+            'svc_execution=not_admitted' \
+            'read_only_denial=private_effects_rejected_not_precise_fault' \
+            'switch2_instructions_executed=0' \
+            'external_backend=research_only'; do
+            grep -Fx "$claim" "$RUNNER_TEMP/nx2-e1-results.txt"
+          done
