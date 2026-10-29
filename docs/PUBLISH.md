@@ -1,32 +1,41 @@
-# Publish the repository with preserved history
+# NX2 Lab — GitHub publication and history
 
-The project is a local Git repository and has not been published to GitHub.
-The connected GitHub app can manage an existing repository but currently
-cannot create a new one. Do not publish under the Astraea repository or erase
-its history.
+**Live repository:** https://github.com/astraea-emu/nx2-lab
 
-1. At https://github.com/new create an **empty** repository named `nx2-lab`
-   in the account that will own the project. Do not pre-populate with a README,
-   license, or .gitignore; these are already in the history.
-2. From the original local project repository (which has no remote), add
-   the remote and push:
+The complete **36-file tracked source tree** was published through the
+connected GitHub Git-object API on 2026-10-29, with tree SHA
+`0323c4d08a2d755e597c18eaa02a7f09f59be28a`.
+This exactly matches the source tree at the original locally tested
+commit `c133acb6dd534ec55374edec01484fe8dd0eec05`.
+
+GitHub's `main` was initialized using a new publication commit
+(`ab4baa5d2e66659c2f6e9a1456d2ba0d1bfb966c`).
+Its **commit history** therefore differs from the original seven-commit
+local development history. That original history is preserved separately
+in `nx2-lab-20261029-v2.bundle`, supplied with the handoff.
+No force-push or history rewrite is necessary for future development.
+
+## Normal contributor workflow
 
 ```sh
-git remote add origin https://github.com/OWNER/nx2-lab.git
-git push --set-upstream origin main
+git clone https://github.com/astraea-emu/nx2-lab.git
+cd nx2-lab
+cmake -S . -B build -DBUILD_TESTING=ON
+cmake --build build --parallel 2
+ctest --test-dir build --output-on-failure
 ```
 
-To restore from the supplied `nx2-lab.bundle` on a new machine, **replace**
-(the bundle clone's already-existing `origin` points at the local bundle):
+Create a feature branch, test it locally, and open a pull request.
+GitHub Actions runs Linux, Windows, macOS and Linux sanitizers.
+Use the PR's **exact final head** and successful checks before merging.
 
-```sh
-git clone nx2-lab-20261029.bundle nx2-lab
-cd nx2-lab
-git remote set-url origin https://github.com/OWNER/nx2-lab.git
-git push --set-upstream origin main
-``` To verify source code
-without Git history, the standalone source ZIP contains only tracked files.
+## Evidence-byte portability
 
-After publishing, enable protected main, require build/test CI and reviews as
-appropriate. Do not publish firmware, console captures, copyrighted binaries,
-keys, or host configuration secrets.
+The source-owned evidence manifests hash exact bytes. The repository's
+`.gitattributes` forces LF line endings for text files on every checkout
+and preserves `*.nx2o` binary fixtures unchanged. This prevents Windows
+`core.autocrlf` transformations from invalidating reproducible hashes.
+
+Never publish proprietary Nintendo firmware, games, encryption keys, personal
+console captures or privileged host secrets. The NX2OWNED file format is
+project-authored, not a Nintendo executable format.
