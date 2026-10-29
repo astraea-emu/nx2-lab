@@ -37,6 +37,8 @@ public:
     unsigned memory_writes = 0;
     unsigned denied_reads = 0;
     unsigned denied_writes = 0;
+    unsigned svc_callbacks = 0;
+    std::uint32_t last_svc = 0;
 
     std::optional<std::uint32_t> MemoryReadCode(Dynarmic::A64::VAddr pc) override {
         if ((pc & 3U) != 0 || pc / 4 >= code.size()) return std::nullopt;
@@ -65,7 +67,13 @@ public:
         unqualified_effect = true;
     }
     void InterpreterFallback(std::uint64_t, std::size_t) override { unqualified_effect = true; }
-    void CallSVC(std::uint32_t) override { unqualified_effect = true; }
+    void CallSVC(std::uint32_t swi) override {
+        ++svc_callbacks;
+        last_svc = swi;
+        // Never dispatch a host service or treat an exception callback as
+        // proof of Nintendo OS semantics.
+        unqualified_effect = true;
+    }
     void ExceptionRaised(std::uint64_t, Dynarmic::A64::Exception) override {
         unqualified_effect = true;
     }
@@ -185,6 +193,57 @@ void denied_access_negative(const char* name, std::uint16_t address,
     std::cout << "denied_access_" << name << "=private_state_discarded\n";
 }
 
+
+void observed_svc_callback_research() {
+    constexpr std::array<std::uint32_t, 5> code{
+        0xD2800540U, 0x91000400U, 0xD503201FU,
+        svc(0x1234U), 0xD4200000U};
+    // The trusted source-owned oracle supplies pre-service state only.
+    const auto reference = nx2::run_owned_program(code, 4);
+    require(reference.stop == nx2::StopReason::service_request &&
+            reference.retired == 3 &&
+            reference.state.pc == 12U &&
+            reference.service_immediate == 0x1234U,
+            "source-owned pre-service state changed");
+
+    OwnedCallbacks candidate(code, true);
+    Dynarmic::A64::UserConfig config{};
+    config.callbacks = &candidate;
+    config.fastmem_pointer = std::nullopt;
+    config.page_table = nullptr;
+    config.silently_mirror_fastmem = false;
+    config.silently_mirror_page_table = false;
+    config.unsafe_optimizations = false;
+    config.check_halt_on_memory_access = true;
+    Dynarmic::A64::Jit cpu(config);
+    cpu.SetPC(0);
+    for (std::size_t i = 0; i < 3; ++i) {
+        cpu.Step();
+        require(!candidate.unqualified_effect && candidate.svc_callbacks == 0U,
+                "unexpected service callback before original SVC");
+    }
+    require(cpu.GetPC() == reference.state.pc &&
+            cpu.GetRegisters() == reference.state.x,
+            "backend pre-service CPU state diverged");
+    const auto unchanged_memory = candidate.bytes;
+
+    // Execute one source-owned SVC instruction through Dynarmic's callback.
+    // The callback ONLY records its immediate, and no synthetic reply is
+    // supplied. PC/CPU state after this Step is deliberately untrusted.
+    cpu.Step();
+    require(candidate.unqualified_effect &&
+            candidate.svc_callbacks == 1U &&
+            candidate.last_svc == 0x1234U &&
+            candidate.memory_reads == 0U &&
+            candidate.memory_writes == 0U &&
+            candidate.denied_reads == 0U &&
+            candidate.denied_writes == 0U &&
+            candidate.bytes == unchanged_memory,
+            "unexpected SVC callback identity or host/guest memory effect");
+    std::cout << "owned_svc_callback=one_exact_0x1234_no_dispatch\n";
+    std::cout << "owned_svc_after_step_state=untrusted_not_published\n";
+}
+
 } // namespace
 
 int main() {
@@ -197,6 +256,7 @@ int main() {
             0xF9400022U, svc(0x1234U), 0xD4200000U};
         compare_owned_trace(arithmetic, 3);
         compare_owned_trace(memory, 4);
+        observed_svc_callback_research();
         denied_access_negative("read_only_write", 0x2000U, true, false, false);
         denied_access_negative("unmapped_write", 0x3000U, true, true, false);
         denied_access_negative("cross_boundary_write", 0x201dU, true, true, false);
@@ -210,7 +270,7 @@ int main() {
         std::cout << "NX2_DYNARMIC_OWNED_TRACE_PASS\n"
                   << "original_instruction_prefixes=3_and_4\n"
                   << "source_owned_guest_memory_readback=checked\n"
-                  << "svc_execution=not_admitted\n"
+                  << "svc_execution=research_callback_only_no_dispatch\n"
                   << "read_only_denial=private_effects_rejected_not_precise_fault\n"
                   << "denied_access_matrix=4_source_owned_cases\n"
                   << "post_denial_cpu_state=untrusted_not_published\n"
