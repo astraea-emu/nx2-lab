@@ -49,6 +49,7 @@ jobs:
             'external_source_code_redistributed=no' \
             'original_first_instruction=0xd2800020' \
             'original_second_instruction=0x580000e1' \
+            'literal_pointer_data_mapping=verified' \
             'linux_or_horizon_services_dispatched=0' \
             'nintendo_software_executed=0'; do
             grep -Fx "$claim" "$RUNNER_TEMP/external-profile.txt"
@@ -66,22 +67,29 @@ jobs:
           temp = Path(os.environ["RUNNER_TEMP"])
           exe = temp / "nx2-e2-build/nx2lab"
           fixture = temp / "independent.nx2o"
+          profile = dict(line.split("=", 1) for line in
+                         (temp / "external-profile.txt").read_text().splitlines()
+                         if "=" in line)
+          literal_pointer = int(profile["literal_guest_address"], 16)
 
           def run():
               result = subprocess.run(
                   [str(exe), "run-owned", str(fixture)],
                   capture_output=True, text=True, timeout=10, check=False)
-              if result.returncode != 1 or result.stderr.strip():
+              if result.returncode != 0 or result.stderr.strip():
                   raise SystemExit("external first-stop result unexpectedly admitted")
               fields = dict(line.split("=", 1) for line in result.stdout.splitlines())
               expected = {
                   "research_only": "1",
                   "switch2_guest_execution": "0",
                   "image_format": "NX2OWNED_v1",
-                  "stop": "unsupported_instruction",
-                  "retired": "1",
-                  "pc": "4",
+                  "stop": "service_request_before_retirement",
+                  "retired": "4",
+                  "pc": "16",
                   "x0": "1",
+                  "service_immediate": "0",
+                  "caller_x1": str(literal_pointer),
+                  "service_dispatched": "0",
               }
               if fields != expected:
                   raise SystemExit(f"external first-stop mismatch: {fields!r}")
@@ -89,9 +97,10 @@ jobs:
 
           if run() != run():
               raise SystemExit("independent AArch64 first-stop nondeterministic")
-          print("NX2_EXTERNAL_GUEST_FIRST_INSTRUCTION_PASS")
-          print("outside_authored_instructions_retired=1")
-          print("first_unsupported_instruction=original_ldr_literal_at_pc_4")
+          print("NX2_EXTERNAL_FIRST_SVC_BOUNDARY_PASS")
+          print("outside_authored_instructions_retired=4")
+          print("first_service_boundary=unretired_linux_svc_zero")
+          print("literal_data_pointer=verified_against_separate_pt_load")
           print("service_dispatch=none")
           print("switch2_game_compatibility=not_claimed")
           PY
@@ -101,4 +110,5 @@ jobs:
           python3 tools/reference/external_arm64/profile_external_elf_selftest.py |
             tee "$RUNNER_TEMP/elf-negatives.txt"
           grep -Fx 'NX2_EXTERNAL_ELF_NEGATIVES_PASS' "$RUNNER_TEMP/elf-negatives.txt"
-          grep -Fx 'invalid_elf_cases=13' "$RUNNER_TEMP/elf-negatives.txt"
+          grep -Fx 'invalid_elf_cases=16' "$RUNNER_TEMP/elf-negatives.txt"
+          grep -Fx 'literal_target_mutations=refused' "$RUNNER_TEMP/elf-negatives.txt"

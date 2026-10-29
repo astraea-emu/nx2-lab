@@ -50,5 +50,54 @@ int main() {
     const auto shift = nx2::run_owned_program(mov_shift, 4);
     require(shift.stop == StopReason::breakpoint &&
             shift.state.x[0] == 0x10000, "MOVZ shift mismatch");
+    // A64 LDR (literal) Xt: signed imm19 * 4 from the current PC.
+    constexpr std::array<std::uint32_t, 4> forward_literal{
+        0x58000040U, 0xD4200000U, 0x11223344U, 0x55667788U};
+    const auto forward = nx2::run_owned_program(forward_literal, 6);
+    require(forward.stop == StopReason::breakpoint && forward.retired == 1 &&
+            forward.state.pc == 4 &&
+            forward.state.x[0] == 0x5566778811223344ULL,
+            "LDR literal positive offset decoded incorrectly");
+    constexpr std::array<std::uint32_t, 4> backward_literal{
+        0x11223344U, 0x55667788U, 0x58ffffc1U, 0xD4200000U};
+    nx2::CpuState start_backward;
+    start_backward.pc = 8;
+    const auto backward = nx2::run_owned_program(
+        backward_literal, 4, start_backward);
+    require(backward.stop == StopReason::breakpoint &&
+            backward.retired == 1 && backward.state.pc == 12 &&
+            backward.state.x[1] == 0x5566778811223344ULL,
+            "LDR literal negative offset decoded incorrectly");
+    constexpr std::array<std::uint32_t, 4> discard_literal{
+        0x5800005fU, 0xD4200000U, 0x11223344U, 0x55667788U};
+    const auto discarded = nx2::run_owned_program(discard_literal, 2);
+    require(discarded.stop == StopReason::breakpoint &&
+            discarded.retired == 1 && discarded.state.pc == 4 &&
+            discarded.state.x == nx2::CpuState{}.x,
+            "LDR literal XZR must discard register write");
+    const auto too_far = nx2::run_owned_program(
+        std::array<std::uint32_t, 2>{0x58000040U, 0xD4200000U}, 2);
+    require(too_far.stop == StopReason::data_access_fault &&
+            too_far.retired == 0 && too_far.state.pc == 0,
+            "LDR literal unmapped positive access retired");
+    const auto too_low = nx2::run_owned_program(
+        std::array<std::uint32_t, 2>{0x58ffffc0U, 0xD4200000U}, 2);
+    require(too_low.stop == StopReason::data_access_fault &&
+            too_low.retired == 0 && too_low.state.pc == 0,
+            "LDR literal negative guest address wrap accepted");
+    const auto partial_literal = nx2::run_owned_program(
+        std::array<std::uint32_t, 3>{0x58000040U, 0xD4200000U,
+                                     0x11223344U}, 2);
+    require(partial_literal.stop == StopReason::data_access_fault &&
+            partial_literal.retired == 0 && partial_literal.state.pc == 0,
+            "LDR literal partial 64-bit read accepted");
+    const auto zero_budget_literal = nx2::run_owned_program(forward_literal, 0);
+    require(zero_budget_literal.stop == StopReason::instruction_budget &&
+            zero_budget_literal.retired == 0, "LDR literal exceeded zero budget");
+    const auto wrong_width_literal = nx2::run_owned_program(
+        std::array<std::uint32_t, 2>{0x18000040U, 0xD4200000U}, 2);
+    require(wrong_width_literal.stop == StopReason::unsupported_instruction &&
+            wrong_width_literal.retired == 0,
+            "unsupported 32-bit literal load silently admitted");
     std::cout << "SOURCE_OWNED_AARCH64_CONTRACT_PASS:11_cases\n";
 }
