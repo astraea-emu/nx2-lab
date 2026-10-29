@@ -240,8 +240,8 @@ void observed_svc_callback_research() {
             candidate.denied_writes == 0U &&
             candidate.bytes == unchanged_memory,
             "unexpected SVC callback identity or host/guest memory effect");
-    std::cout << "owned_svc_callback=one_exact_0x1234_no_dispatch\\n";
-    std::cout << "owned_svc_after_step_state=untrusted_not_published\\n";
+    std::cout << "owned_svc_callback=one_exact_0x1234_no_dispatch\n";
+    std::cout << "owned_svc_after_step_state=untrusted_not_published\n";
 }
 
 } // namespace
@@ -270,7 +270,7 @@ int main() {
         std::cout << "NX2_DYNARMIC_OWNED_TRACE_PASS\n"
                   << "original_instruction_prefixes=3_and_4\n"
                   << "source_owned_guest_memory_readback=checked\n"
-                  << "svc_execution=research_callback_only_no_dispatch\\n"
+                  << "svc_execution=research_callback_only_no_dispatch\n"
                   << "read_only_denial=private_effects_rejected_not_precise_fault\n"
                   << "denied_access_matrix=4_source_owned_cases\n"
                   << "post_denial_cpu_state=untrusted_not_published\n"
