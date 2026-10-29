@@ -33,7 +33,7 @@
   CPU extensions, real ABI, Horizon process loader,
   kernel/Horizon implementation, HIPC, GPU, graphics, input, sound, saves,
   game compatibility, console-side probe, any jailbreak or firmware handling.
-- No external CI run until a hosted GitHub repository is created.
+- Public GitHub repository created and exact source-tree identity verified on 2026-10-29. The first hosted CI run passed Linux, macOS and sanitizers; Windows rejected two source-text SHA manifests because of checkout line endings. Branch `fix/ci-evidence-line-endings-20261029` adds portable LF rules and must pass cross-platform CI before merge.
 
 ## Current public landscape
 
@@ -46,7 +46,7 @@
 
 ## Next accepted work
 
-1. Establish a clean public repository with required tests and MIT license.
+1. Complete hosted GitHub CI across Linux, Windows, macOS and sanitizers; review failure negatives and enforce protected main after successful baseline.
 2. Accept a generic ARM64 CPU backend **only** after independent instruction
    correctness and license verification. Do not hand-code the whole ISA.
 3. The source-owned executable-image path now reaches an unretired SVC stop
