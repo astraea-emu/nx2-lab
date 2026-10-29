@@ -32,7 +32,12 @@
   unmapped stores, boundary-crossing stores and write-only loads. The tiny
   interpreter supplies typed reference faults; the research JIT callback
   rejects unauthorized private memory effects and discards all post-denial
-  CPU state without claiming a precise JIT fault or a production sandbox. This is **not** a precise guest fault or an approved
+  CPU state without claiming a precise JIT fault or a production sandbox.
+  A separately frozen source-owned `SVC #0x1234` fixture now reaches the
+  actual Dynarmic JIT callback exactly once with no host dispatch or guest
+  memory effects. Post-callback JIT state is deliberately not published:
+  the research callback is neither a genuine Horizon service nor an
+  authenticated ARM exception-return contract. This is **not** a precise guest fault or an approved
   production CPU backend; licensing and hostile-worker containment remain
   separate acceptance gates.
 - Three host-only demonstrations, including a 28-byte NX2OWNED v1 standalone
