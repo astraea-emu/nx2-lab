@@ -28,8 +28,11 @@
   with its recorded submodules and executes original MOVZ/ADD/NOP and
   MOVZ/STR/LDR prefixes. All 31 GPRs, PC and guest-memory readback match
   the tiny owned oracle; the exact SVC boundary remains unexecuted.
-  One denied read-only store is detected without publishing the mutated
-  private memory. This is **not** a precise guest fault or an approved
+  A source-owned four-case denied-access matrix now checks read-only stores,
+  unmapped stores, boundary-crossing stores and write-only loads. The tiny
+  interpreter supplies typed reference faults; the research JIT callback
+  rejects unauthorized private memory effects and discards all post-denial
+  CPU state without claiming a precise JIT fault or a production sandbox. This is **not** a precise guest fault or an approved
   production CPU backend; licensing and hostile-worker containment remain
   separate acceptance gates.
 - Three host-only demonstrations, including a 28-byte NX2OWNED v1 standalone
