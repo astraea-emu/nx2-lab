@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "owned-aarch64-memory-v1",
+  "category": "source_owned",
+  "source_file": "fixtures/owned-aarch64-memory-words.txt",
+  "sha256": "0851daee0cdac8465c8f4e7ded24fe51b0de072f023adb5151c43c1600e710a4",
+  "date_utc": "2026-10-29",
+  "claims": [
+    "Host-only generic AArch64 STR/LDR 64-bit instructions access a checked guest memory region",
+    "Two instructions retire; X2=0x11223344 and PC=8; BRK stops before retirement"
+  ],
+  "limitations": [
+    "No Switch 2 ABI, MMU, guest service or firmware behavior established",
+    "No console access, exploitation or commercial game execution",
+    "This manifest validates source identity, not external CPU semantic equivalence"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "owned-executable-v1",
+  "category": "source_owned",
+  "source_file": "fixtures/owned-aarch64-demo.nx2o",
+  "sha256": "5c5d0045d5e7a175cb0c60ace17c6c4b777634eef35f6520bea4262d31f5ef26",
+  "date_utc": "2026-10-29",
+  "claims": [
+    "NX2OWNED_v1 standalone source-owned image (28 bytes) parses and executes generic ARM64 MOVZ/ADD/BRK",
+    "Two instructions retire; X0=43; stop=breakpoint_before_retirement"
+  ],
+  "limitations": [
+    "NX2OWNED is not a Nintendo file type, ABI or firmware executable",
+    "No commercial games, console execution, Horizon services or GPU behavior",
+    "The independent evidence verifier only checks exact input source identity"
+  ]
+}

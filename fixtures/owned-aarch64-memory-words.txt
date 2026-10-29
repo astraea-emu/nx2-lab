@@ -1,0 +1,7 @@
+# Independent, source-owned generic AArch64 words, little-endian instruction order.
+# STR X0,[X1] (64-bit unsigned immediate encoding; offset 0)
+f9000020
+# LDR X2,[X1] (64-bit unsigned immediate encoding; offset 0)
+f9400022
+# BRK #0 (not retired)
+d4200000

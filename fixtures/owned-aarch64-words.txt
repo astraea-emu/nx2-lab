@@ -1,0 +1,7 @@
+# Immutable independently authored AArch64 research program, words in execution order
+# MOVZ X0,#42
+0xD2800540
+# ADD X0,X0,#1
+0x91000400
+# BRK #0
+0xD4200000

@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "owned-aarch64-demo-v1",
+  "category": "source_owned",
+  "source_file": "fixtures/owned-aarch64-words.txt",
+  "sha256": "b3723a83cf9b32ead9bd1749bfc392dfaad7e210a17cc8cd0cf0313ccf7bc926",
+  "date_utc": "2026-10-29",
+  "claims": [
+    "Host-only AArch64 MOVZ/ADD program reaches a pre-retirement BRK stop",
+    "Two instructions retire; X0=43 and PC=8; no Switch 2 binary executes"
+  ],
+  "limitations": [
+    "No Switch 2 process ABI or service semantics verified",
+    "No hardware execution, console access, firmware or proprietary bytes",
+    "This metadata check alone cannot attest runtime behavior"
+  ]
+}

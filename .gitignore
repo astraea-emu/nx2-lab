@@ -1,0 +1,21 @@
+/build/
+/build-asan/
+/build-*/
+/out/
+/.cache/
+/.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+.vscode/
+.idea/
+# Device captures, private diagnostic records and copyrighted content:
+/private/
+/captures/
+/firmware/
+/keys/
+/roms/
+/*.nca
+/*.xci
+/*.nsp
+/*.keys

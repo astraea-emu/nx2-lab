@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "owned-service-stop-v1",
+  "category": "source_owned",
+  "source_file": "fixtures/owned-aarch64-service.nx2o",
+  "sha256": "5d47e8f616beb0c2c28cb1b7679713dcf5404a58df29339804d01c33ebc4c7dc",
+  "date_utc": "2026-10-29",
+  "claims": [
+    "NX2OWNED v1 source-only AArch64 image reaches an SVC #0x1234 boundary without retiring it",
+    "Two MOVZ instructions retire; X0=7; X1=9; PC=8 and SVC remains unexecuted"
+  ],
+  "limitations": [
+    "No service dispatch, host syscall or Nintendo/Horizon ABI semantics",
+    "Fixture is not a Nintendo executable or commercial title"
+  ]
+}
