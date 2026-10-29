@@ -13,6 +13,7 @@ constexpr std::uint32_t kBrkPattern = 0xD4200000U;
 constexpr std::uint32_t kSvcPattern = 0xD4000001U;
 constexpr std::uint32_t kStr64Pattern = 0xF9000000U;
 constexpr std::uint32_t kLdr64Pattern = 0xF9400000U;
+constexpr std::uint32_t kLdrLiteral64Pattern = 0x58000000U;
 } // namespace
 
 RunResult run_owned_program(
@@ -71,6 +72,31 @@ RunResult run_owned_program(
                 static_cast<std::uint64_t>((word >> 10U) & 0xFFFU)
                 << (shift == 1U ? 12U : 0U);
             out.state.x[rd] = out.state.x[rn] + operand;
+        } else if ((word & 0xFF000000U) == kLdrLiteral64Pattern) {
+            // Generic A64 LDR (literal), 64-bit Xt: sign-extended imm19
+            // scaled by four from the ADDRESS OF THIS instruction, not PC+4.
+            // This deliberately bounded oracle admits only a literal pair
+            // wholly inside the source-owned code image; a real runtime
+            // will need a separate checked guest virtual address space.
+            const std::uint32_t imm19 = (word >> 5U) & 0x7FFFFU;
+            const std::int64_t delta_words = (imm19 & 0x40000U)
+                ? static_cast<std::int64_t>(imm19) - 0x80000
+                : static_cast<std::int64_t>(imm19);
+            const auto instruction_index =
+                static_cast<std::int64_t>(out.state.pc / 4U);
+            const auto literal_index = instruction_index + delta_words;
+            if (literal_index < 0 ||
+                literal_index >= static_cast<std::int64_t>(words.size()) - 1) {
+                out.stop = StopReason::data_access_fault;
+                return out;
+            }
+            const auto index = static_cast<std::size_t>(literal_index);
+            const std::uint64_t value = words[index] |
+                (static_cast<std::uint64_t>(words[index + 1U]) << 32U);
+            const unsigned rt = word & 0x1FU;
+            if (rt < 31U) {
+                out.state.x[rt] = value;
+            } // XZR consumes the read but discards the value.
         } else if ((word & 0xFFC00000U) == kStr64Pattern ||
                    (word & 0xFFC00000U) == kLdr64Pattern) {
             // Generic AArch64 64-bit unsigned-offset LDR/STR. Offset is
