@@ -48,7 +48,9 @@ jobs:
             'NX2_DYNARMIC_OWNED_TRACE_PASS' \
             'original_instruction_prefixes=3_and_4' \
             'source_owned_guest_memory_readback=checked' \
-            'svc_execution=not_admitted' \
+            'svc_execution=research_callback_only_no_dispatch' \
+            'owned_svc_callback=one_exact_0x1234_no_dispatch' \
+            'owned_svc_after_step_state=untrusted_not_published' \
             'read_only_denial=private_effects_rejected_not_precise_fault' \
             'denied_access_read_only_write=private_state_discarded' \
             'denied_access_unmapped_write=private_state_discarded' \
