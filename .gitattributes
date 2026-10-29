@@ -1,0 +1,6 @@
+# Evidence manifests hash source bytes. Keep the checkout identical on
+# Linux, macOS and Windows regardless of core.autocrlf.
+* text=auto eol=lf
+
+# Independently authored research images are raw bytes, never text.
+*.nx2o -text
