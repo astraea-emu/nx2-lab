@@ -50,6 +50,12 @@ jobs:
             'source_owned_guest_memory_readback=checked' \
             'svc_execution=not_admitted' \
             'read_only_denial=private_effects_rejected_not_precise_fault' \
+            'denied_access_read_only_write=private_state_discarded' \
+            'denied_access_unmapped_write=private_state_discarded' \
+            'denied_access_cross_boundary_write=private_state_discarded' \
+            'denied_access_write_only_read=private_state_discarded' \
+            'denied_access_matrix=4_source_owned_cases' \
+            'post_denial_cpu_state=untrusted_not_published' \
             'switch2_instructions_executed=0' \
             'external_backend=research_only'; do
             grep -Fx "$claim" "$RUNNER_TEMP/nx2-e1-results.txt"
