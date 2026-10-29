@@ -1,0 +1,122 @@
+name: E3 original HBX stage-1 guest execution (Linux research)
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/e3-hbx-original-stage1.yml'
+      - 'tools/reference/hblauncher/**'
+      - 'docs/STATUS.md'
+      - 'docs/research/hblauncher_original_guest_2026-10-29.md'
+permissions:
+  contents: read
+jobs:
+  hbx-original-stage1:
+    name: NX2 executes original HBX stage 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned source build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build git clang libboost-dev python3 \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-user
+      - name: Freeze independent HBLauncher and Dynarmic revisions
+        env:
+          HBX_SHA: 18b4748ba98eeac7df17beb5d3418985eb74897c
+          DYNARMIC_SHA: a46601580d5512d324104f985b5f0209dc980ddc
+        run: |
+          set -euo pipefail
+          git clone https://github.com/ravensclawx/HBLauncher.git "$RUNNER_TEMP/hblauncher"
+          git -C "$RUNNER_TEMP/hblauncher" checkout --detach "$HBX_SHA"
+          test "$(git -C "$RUNNER_TEMP/hblauncher" rev-parse HEAD)" = "$HBX_SHA"
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object apps/hello-cpu/src/app.c)" = 0513fa7d0b333ffdde2ee985f65900ee7f8f7e65
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object sdk/abi.json)" = c143bba98182d22240bfbc692ebc2dbaa3059c9d
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object sdk/tools/hbx-build.py)" = a270514d010049dac1304cc7da25d63896e3bb99
+          test "$(git -C "$RUNNER_TEMP/hblauncher" hash-object sdk/src/crt0.S)" = 527bd97390b9ea607b4e109fa1850c580bfd2206
+          test -z "$(git -C "$RUNNER_TEMP/hblauncher" status --porcelain)"
+          grep -Fxq 'MIT License' "$RUNNER_TEMP/hblauncher/LICENSE"
+          git clone https://github.com/azahar-emu/dynarmic.git "$RUNNER_TEMP/dynarmic"
+          git -C "$RUNNER_TEMP/dynarmic" checkout --detach "$DYNARMIC_SHA"
+          test "$(git -C "$RUNNER_TEMP/dynarmic" rev-parse HEAD)" = "$DYNARMIC_SHA"
+          git -C "$RUNNER_TEMP/dynarmic" submodule update --init --recursive
+          test -z "$(git -C "$RUNNER_TEMP/dynarmic" status --porcelain)"
+      - name: Compile original unchanged Hello CPU HBX native image
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hblauncher"
+          python3 sdk/tools/hbx-build.py apps/hello-cpu \
+            --out "$RUNNER_TEMP/hbx-stage1" --clean
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'hbx-stage1'
+          report=json.loads((root/'report.json').read_text())
+          assert report['format']=='hblauncher-native-app/1'
+          assert report['id']=='hello-cpu' and report['abi']==3
+          assert report['kind']=='native'
+          for name, label in [('code.bin','codeSha256'),('data.bin','dataSha256')]:
+              raw=(root/name).read_bytes()
+              assert hashlib.sha256(raw).hexdigest()==report[label]
+          code_base=int(report['codeBase'],16)
+          entry=int(report['hbxAppMain'],16)
+          assert code_base<=entry<code_base+report['codeBytes']
+          assert report['dataRegionBytes']>=report['dataBytes']
+          assert report['codeBytes'] <= 2*1024*1024
+          assert report['dataRegionBytes'] <= 2*1024*1024
+          print('HBX_ORIGINAL_NATIVE_IMAGE_VERIFIED')
+          print('original_code_sha256='+report['codeSha256'])
+          print('original_data_sha256='+report['dataSha256'])
+          print('original_hbx_app_main='+report['hbxAppMain'])
+          print('guest_horizon_abi=not_claimed')
+          PY
+      - name: Build research-only NX2 Dynarmic guest adapter
+        run: |
+          cmake -S tools/reference/hblauncher \
+            -B "$RUNNER_TEMP/nx2-e3-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DNX2_PINNED_DYNARMIC_SOURCE="$RUNNER_TEMP/dynarmic"
+          cmake --build "$RUNNER_TEMP/nx2-e3-build" \
+            --target nx2_hbx_stage1 --parallel 2
+      - name: Execute unchanged external HBX app through NX2's checked guest runtime
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json, os, subprocess
+          temp=Path(os.environ['RUNNER_TEMP'])
+          root=temp/'hbx-stage1'
+          spec=json.loads((root/'report.json').read_text())
+          exe=temp/'nx2-e3-build/nx2_hbx_stage1'
+          args=[str(exe),str(root/'code.bin'),str(root/'data.bin'),
+                spec['codeBase'],spec['dataBase'],spec['hbxAppMain'],
+                str(spec['dataRegionBytes'])]
+          run=subprocess.run(args,capture_output=True,text=True,timeout=20)
+          print(run.stdout,end='')
+          print(run.stderr,end='')
+          if run.returncode:
+              raise SystemExit('NX2 guest stage-1 failed: '+str(run.returncode))
+          expected=[
+              'NX2_HBX_STAGE1_ORIGINAL_GUEST_PASS',
+              'hbx_original_valid_ret=0',
+              'hbx_original_bad_magic_ret=2',
+              'hbx_original_bad_version_ret=2',
+              'hbx_original_bad_size_ret=2',
+              'hbx_rejected_bad_pointer=1',
+              'hbx_rejected_no_stack_write=1',
+              'hbx_rejected_bad_entry=1',
+              'host_services_dispatched=0',
+              'nintendo_horizon_calls=0',
+              'switch2_hardware_observations=0',
+          ]
+          lines=run.stdout.splitlines()
+          for line in expected:
+              if line not in lines:
+                  raise SystemExit('missing verified result: '+line)
+          values=[int(line.split('=',1)[1]) for line in lines
+                  if line.startswith('hbx_original_instructions_retired=')]
+          if len(values)!=1 or not 2<=values[0]<=4096:
+              raise SystemExit('missing genuine original AArch64 instruction progress')
+          print('NX2_HBX_STAGE1_CI_ACCEPTED')
+          PY
