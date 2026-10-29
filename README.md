@@ -3,9 +3,21 @@
 **Independent, clean-room Nintendo Switch 2 security research and emulation foundations.**
 
 > **Status (2026-10-29): not a Switch 2 emulator, jailbreak, custom firmware,
-> firmware loader, or commercial game runner.** The only executable implementation
-> is a small host-only, source-authored AArch64 instruction fixture for exercising
-> the CPU, memory, and service-stop/evidence contracts. It makes **no** Switch 2 ABI claim.
+> firmware loader, or commercial game runner.** Generic, bounded AArch64
+> test fixtures and a pinned, externally authored **Linux** AArch64 ELF have
+> run under research-only test workflows with strictly mock service handling.
+> There are **zero measured Switch 2 ABI or game execution results**.
+
+## Current direction
+
+Read [the evidence-first strategic roadmap](docs/STRATEGY_2026-10-29.md).
+The primary next deliverable is a reusable, externally reproducible
+**Switch 2 compatibility/conformance corpus**. An independent emulator
+runtime and authorized vulnerability research are distinct tracks.
+The small CPU interpreter is a correctness oracle; adding generic ARM64
+opcodes is not a substitute for verified Horizon, graphics or device ABI
+behavior. New findings must separate source claims, host-only reproduction,
+and authorized device observations.
 
 ## Why a separate project?
 
