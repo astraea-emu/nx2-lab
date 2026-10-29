@@ -5,6 +5,7 @@ on:
     paths:
       - '.github/workflows/e1-dynarmic-research.yml'
       - 'tools/reference/dynarmic/**'
+      - 'docs/STATUS.md'
       - 'src/cpu.cpp'
       - 'src/memory.cpp'
       - 'include/nx2/**'
