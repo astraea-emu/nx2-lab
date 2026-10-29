@@ -83,6 +83,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--elf', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--data-output', type=Path,
+                        help='Research-only verified original message sidecar')
     args = parser.parse_args()
     try:
         raw = args.elf.read_bytes()
@@ -90,6 +92,12 @@ def main():
     except (OSError, ExternalElfRefused, struct.error) as exc:
         parser.exit(2, 'NX2_EXTERNAL_ELF_REFUSED:' + str(exc) + '\n')
     args.output.write_bytes(image)
+    if args.data_output is not None:
+        # This constant was independently checked against the exact source
+        # ELF's nonexecutable PT_LOAD by make_owned_image. The separately
+        # created bytes are never committed, forwarded to a host syscall,
+        # or interpreted as Nintendo/Horizon data.
+        args.data_output.write_bytes(SOURCE_MESSAGE)
     print('NX2_EXTERNAL_ELF_PROFILE_PASS')
     print('external_source_code_redistributed=no')
     print('guest_format=ELF64_AArch64_research_extract')

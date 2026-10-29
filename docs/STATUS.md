@@ -51,6 +51,16 @@
   and source-owned signed-offset/64-bit read fault tests are required.
   No actual Linux syscall, Nintendo/Horizon service or graphical output is
   performed; this is not a general ELF loader or game/homebrew compatibility.
+  **New research-only mock continuation under review:** the exact pinned
+  external first `SVC #0` is *not dispatched*; a source-verified, read-only,
+  14-byte guest message is checked through the existing 64-bit guest-memory
+  facade, and an explicitly authorized fixture reply returns 14 in X0. The
+  unchanged program then retires two more original instructions and stops
+  before its second `SVC #0` (`X8=93`, original Linux exit request).
+  This models six original instruction retirements and zero host syscalls;
+  neither the first nor second SVC is actually retired. Ten source-owned
+  tamper negatives plus a changed external-message sidecar are refused.
+  It is **not** a real Linux write, exit, Horizon OS service or Nintendo run.
 - Three host-only demonstrations, including a 28-byte NX2OWNED v1 standalone
   executable image with strict header/count/entry validation, and four
   SHA-256 evidence manifests. Thirteen local CTest groups pass on Linux.
