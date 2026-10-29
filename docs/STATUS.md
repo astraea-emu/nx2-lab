@@ -40,6 +40,16 @@
   authenticated ARM exception-return contract. This is **not** a precise guest fault or an approved
   production CPU backend; licensing and hostile-worker containment remain
   separate acceptance gates.
+- **E2 outside-authored first-entry research (PR pending):** a reviewed,
+  separately cloned MIT-licensed Linux AArch64 assembly program is compiled
+  to a real ELF64 executable. An opt-in, read-only, bounded ELF segment
+  extractor wraps its original RX instructions in the source-owned
+  NX2OWNED test envelope (it is not a general ELF loader). NX2 executes
+  the unchanged external first `MOVZ X0,#1`, then stops with
+  `unsupported_instruction` at the original `LDR literal` (PC 4),
+  in two deterministic runs. No Linux syscall, Horizon service, Nintendo
+  executable, graphics or real homebrew compatibility is claimed.
+  The original external source/binary are **never committed**.
 - Three host-only demonstrations, including a 28-byte NX2OWNED v1 standalone
   executable image with strict header/count/entry validation, and four
   SHA-256 evidence manifests. Thirteen local CTest groups pass on Linux.
@@ -66,7 +76,12 @@
 1. Main's four CI jobs have passed. Protect main with required checks via repository administration when available; do not block useful research on a missing admin action.
 2. Accept a generic ARM64 CPU backend **only** after independent instruction
    correctness and license verification. Do not hand-code the whole ISA.
-3. The source-owned executable-image path now reaches an unretired SVC stop
+3. Advance the exact independently authored external AArch64 ELF path from
+   its first original instruction to the next independently defined
+   unsupported `LDR literal` boundary, then qualify any required mapped
+   data/code semantics against the original executable and an external
+   oracle. Do not confuse Linux userland syscalls with Horizon.
+4. The source-owned executable-image path now reaches an unretired SVC stop
    and a separately allowed **mock fixture** can continue to a subsequent BRK.
    Next, qualify a maintained ARMv8 CPU backend against these frozen register,
    service/fault and guest-memory examples. Do not expand this tiny interpreter
