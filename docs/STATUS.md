@@ -23,6 +23,15 @@
   The separately bounded CLI reads only a local NX2OWNED fixture file.
 - Offline, size- and path-bounded owned-fixture SHA-256 evidence verifier.
 - CMake/CTest and a GitHub Actions cross-platform CI **configuration**.
+- Research-only pinned Dynarmic AArch64 JIT qualification (PR #3): a separate
+  Linux CI job builds exact public revision `a46601580d5512d324104f985b5f0209dc980ddc`
+  with its recorded submodules and executes original MOVZ/ADD/NOP and
+  MOVZ/STR/LDR prefixes. All 31 GPRs, PC and guest-memory readback match
+  the tiny owned oracle; the exact SVC boundary remains unexecuted.
+  One denied read-only store is detected without publishing the mutated
+  private memory. This is **not** a precise guest fault or an approved
+  production CPU backend; licensing and hostile-worker containment remain
+  separate acceptance gates.
 - Three host-only demonstrations, including a 28-byte NX2OWNED v1 standalone
   executable image with strict header/count/entry validation, and four
   SHA-256 evidence manifests. Thirteen local CTest groups pass on Linux.
@@ -33,7 +42,7 @@
   CPU extensions, real ABI, Horizon process loader,
   kernel/Horizon implementation, HIPC, GPU, graphics, input, sound, saves,
   game compatibility, console-side probe, any jailbreak or firmware handling.
-- Public GitHub repository created and exact source-tree identity verified on 2026-10-29. The first hosted CI run passed Linux, macOS and sanitizers; Windows rejected two source-text SHA manifests because of checkout line endings. Branch `fix/ci-evidence-line-endings-20261029` adds portable LF rules and must pass cross-platform CI before merge.
+- Full Switch 2 / Horizon device ABI, runtime and commercial compatibility still require independent evidence. GitHub's core Linux/Windows/macOS/sanitizer CI was repaired and passed on main (PR #1).
 
 ## Current public landscape
 
@@ -46,7 +55,7 @@
 
 ## Next accepted work
 
-1. Complete hosted GitHub CI across Linux, Windows, macOS and sanitizers; review failure negatives and enforce protected main after successful baseline.
+1. Main's four CI jobs have passed. Protect main with required checks via repository administration when available; do not block useful research on a missing admin action.
 2. Accept a generic ARM64 CPU backend **only** after independent instruction
    correctness and license verification. Do not hand-code the whole ISA.
 3. The source-owned executable-image path now reaches an unretired SVC stop
