@@ -82,6 +82,19 @@
 - Pound: https://github.com/pound-emu/pound — Switch-family architecture
   research and Ballistic CPU JIT effort; no published Switch 2 game run.
 
+## Original HBX stage-1 guest execution (draft PR; NOT verified until specialized CI)
+
+A research-only pinned Dynarmic adapter now attempts to run the original
+HBLauncher `hbx_app_main` AArch64 instructions with an independently prepared,
+source-defined HBX v3 context, immutable original RX code, separate RW data/BSS,
+and a bounded guest stack. Only an exact `HBX_OK` stage-1 return and
+source-defined `HBX_ERR_ABI` negative returns can be accepted; unauthorized
+memory faults, service requests and missing returns fail closed. Stage 1
+**bypasses the SDK `_start` trampoline** by directly entering the original
+function. The runner's code is not admitted as a completed capability
+until the pinned E3 execution CI and all required checks pass.
+This is neither a Switch 2 Horizon implementation nor a game.
+
 ## First native-facing independent research target (host-only)
 
 A pinned HBLauncher SDK v3 source revision and original host/QEMU AArch64
