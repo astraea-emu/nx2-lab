@@ -1,0 +1,104 @@
+name: E2 pinned external AArch64 first-stop research
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/e2-external-aarch64.yml'
+      - 'tools/reference/external_arm64/**'
+      - 'docs/STATUS.md'
+      - 'src/cpu.cpp'
+      - 'src/owned_image.cpp'
+      - 'src/main.cpp'
+      - 'include/nx2/**'
+permissions:
+  contents: read
+jobs:
+  external-source-first-stop:
+    name: External AArch64 first genuine instruction
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deterministic toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends clang lld cmake git python3
+      - name: Checkout reviewed MIT-licensed independent source
+        env:
+          PINNED_REV: 3b3430f38d01e8051bf2d6d642064cc0a8d3cdb1
+          PINNED_BLOB: 0c73aee554a01bbd01a1eebc2c9b847a46952551
+        run: |
+          set -euo pipefail
+          git clone https://github.com/pysogge/assembly_mac_linux_arm64_x8664.git "$RUNNER_TEMP/external-aarch64"
+          git -C "$RUNNER_TEMP/external-aarch64" checkout --detach "$PINNED_REV"
+          test "$(git -C "$RUNNER_TEMP/external-aarch64" rev-parse HEAD)" = "$PINNED_REV"
+          test "$(git -C "$RUNNER_TEMP/external-aarch64" hash-object linux_arm64/HelloWorld.s)" = "$PINNED_BLOB"
+          test -z "$(git -C "$RUNNER_TEMP/external-aarch64" status --porcelain)"
+          grep -q 'MIT License' "$RUNNER_TEMP/external-aarch64/LICENSE"
+      - name: Build external AArch64 Linux ELF and bounded NX2 research image
+        run: |
+          set -euo pipefail
+          source="$RUNNER_TEMP/external-aarch64/linux_arm64/HelloWorld.s"
+          clang --target=aarch64-linux-gnu -c "$source" -o "$RUNNER_TEMP/hello.o"
+          ld.lld -m aarch64elf --build-id=none -e _start "$RUNNER_TEMP/hello.o" -o "$RUNNER_TEMP/hello.elf"
+          python3 tools/reference/external_arm64/profile_external_elf.py \
+            --elf "$RUNNER_TEMP/hello.elf" --output "$RUNNER_TEMP/independent.nx2o" |
+            tee "$RUNNER_TEMP/external-profile.txt"
+          for claim in \
+            'NX2_EXTERNAL_ELF_PROFILE_PASS' \
+            'external_source_code_redistributed=no' \
+            'original_first_instruction=0xd2800020' \
+            'original_second_instruction=0x580000e1' \
+            'linux_or_horizon_services_dispatched=0' \
+            'nintendo_software_executed=0'; do
+            grep -Fx "$claim" "$RUNNER_TEMP/external-profile.txt"
+          done
+      - name: Prove original external instruction retires to honest unsupported stop
+        run: |
+          set -euo pipefail
+          cmake -S . -B "$RUNNER_TEMP/nx2-e2-build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build "$RUNNER_TEMP/nx2-e2-build" --target nx2lab --parallel 2
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import subprocess
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          exe = temp / "nx2-e2-build/nx2lab"
+          fixture = temp / "independent.nx2o"
+
+          def run():
+              result = subprocess.run(
+                  [str(exe), "run-owned", str(fixture)],
+                  capture_output=True, text=True, timeout=10, check=False)
+              if result.returncode != 1 or result.stderr.strip():
+                  raise SystemExit("external first-stop result unexpectedly admitted")
+              fields = dict(line.split("=", 1) for line in result.stdout.splitlines())
+              expected = {
+                  "research_only": "1",
+                  "switch2_guest_execution": "0",
+                  "image_format": "NX2OWNED_v1",
+                  "stop": "unsupported_instruction",
+                  "retired": "1",
+                  "pc": "4",
+                  "x0": "1",
+              }
+              if fields != expected:
+                  raise SystemExit(f"external first-stop mismatch: {fields!r}")
+              return result.stdout
+
+          if run() != run():
+              raise SystemExit("independent AArch64 first-stop nondeterministic")
+          print("NX2_EXTERNAL_GUEST_FIRST_INSTRUCTION_PASS")
+          print("outside_authored_instructions_retired=1")
+          print("first_unsupported_instruction=original_ldr_literal_at_pc_4")
+          print("service_dispatch=none")
+          print("switch2_game_compatibility=not_claimed")
+          PY
+      - name: Reject malformed source-owned ELF envelopes
+        run: |
+          set -euo pipefail
+          python3 tools/reference/external_arm64/profile_external_elf_selftest.py |
+            tee "$RUNNER_TEMP/elf-negatives.txt"
+          grep -Fx 'NX2_EXTERNAL_ELF_NEGATIVES_PASS' "$RUNNER_TEMP/elf-negatives.txt"
+          grep -Fx 'invalid_elf_cases=13' "$RUNNER_TEMP/elf-negatives.txt"
