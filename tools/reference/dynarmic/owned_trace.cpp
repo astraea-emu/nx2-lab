@@ -182,7 +182,7 @@ void denied_access_negative(const char* name, std::uint16_t address,
     // Deliberately do not demand post-Step PC equality: it may already
     // have advanced after a failed void memory callback. That unresolved
     // restart/exception behavior keeps the JIT candidate on HOLD.
-    std::cout << "denied_access_" << name << "=private_state_discarded\\n";
+    std::cout << "denied_access_" << name << "=private_state_discarded\n";
 }
 
 } // namespace
@@ -211,9 +211,9 @@ int main() {
                   << "original_instruction_prefixes=3_and_4\n"
                   << "source_owned_guest_memory_readback=checked\n"
                   << "svc_execution=not_admitted\n"
-                  << "read_only_denial=private_effects_rejected_not_precise_fault\\n"
-                  << "denied_access_matrix=4_source_owned_cases\\n"
-                  << "post_denial_cpu_state=untrusted_not_published\\n"
+                  << "read_only_denial=private_effects_rejected_not_precise_fault\n"
+                  << "denied_access_matrix=4_source_owned_cases\n"
+                  << "post_denial_cpu_state=untrusted_not_published\n"
                   << "switch2_instructions_executed=0\n"
                   << "external_backend=research_only\n";
     } catch (const std::exception& e) {
