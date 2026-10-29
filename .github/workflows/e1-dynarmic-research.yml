@@ -29,6 +29,9 @@ jobs:
           git -C "$RUNNER_TEMP/dynarmic" checkout --detach "$DYNARMIC_SHA"
           test "$(git -C "$RUNNER_TEMP/dynarmic" rev-parse HEAD)" = "$DYNARMIC_SHA"
           test -z "$(git -C "$RUNNER_TEMP/dynarmic" status --porcelain)"
+          # Fetch the exact submodule commits recorded by the pinned tree.
+          git -C "$RUNNER_TEMP/dynarmic" submodule update --init --recursive
+          git -C "$RUNNER_TEMP/dynarmic" submodule status --recursive
           grep -Fq 'SPDX-License-Identifier: 0BSD' "$RUNNER_TEMP/dynarmic/src/dynarmic/interface/A64/a64.h"
       - name: Configure research-only backend comparison
         run: |
