@@ -51,7 +51,7 @@
   and source-owned signed-offset/64-bit read fault tests are required.
   No actual Linux syscall, Nintendo/Horizon service or graphical output is
   performed; this is not a general ELF loader or game/homebrew compatibility.
-  **New research-only mock continuation under review:** the exact pinned
+  **Merged research-only mock continuation (#9):** the exact pinned
   external first `SVC #0` is *not dispatched*; a source-verified, read-only,
   14-byte guest message is checked through the existing 64-bit guest-memory
   facade, and an explicitly authorized fixture reply returns 14 in X0. The
@@ -82,20 +82,27 @@
 - Pound: https://github.com/pound-emu/pound — Switch-family architecture
   research and Ballistic CPU JIT effort; no published Switch 2 game run.
 
+## Strategic direction (October 29)
+
+[Evidence-first strategy](STRATEGY_2026-10-29.md) makes a cross-project
+compatibility/conformance corpus the next critical deliverable. The present
+external executable is **Linux ARM64**, not Switch 2 homebrew. No Nintendo
+system service, real hardware ABI, exploit, or game has been reproduced.
+Preserve current CPU tests as an independent correctness oracle and keep
+Dynarmic on HOLD until faults, licensing and host constraints are qualified.
+
 ## Next accepted work
 
-1. Main's four CI jobs have passed. Protect main with required checks via repository administration when available; do not block useful research on a missing admin action.
-2. Accept a generic ARM64 CPU backend **only** after independent instruction
-   correctness and license verification. Do not hand-code the whole ISA.
-3. The next measurable E2 boundary is a deliberately authorized, mock-only
-   Linux write/exit service test for the same pinned external source, using
-   only modelled guest memory and no host system calls. Independently verify
-   guest buffer addressing and mock return effects before any continuation.
-   This would **not** be Horizon/NSO/NRO support.
-4. The source-owned executable-image path now reaches an unretired SVC stop
-   and a separately allowed **mock fixture** can continue to a subsequent BRK.
-   Next, qualify a maintained ARMv8 CPU backend against these frozen register,
-   service/fault and guest-memory examples. Do not expand this tiny interpreter
-   into a general ARM CPU or claim Nintendo service compatibility.
-4. Add real Switch 2 compatibility claims **only** when supported by separately
-   attributable hardware/public evidence and legally acceptable tests.
+1. Freeze a public source/claim matrix for Switch 2 compatibility mode and
+   select one independently reproducible native-facing homebrew input.
+2. Produce a versioned cross-backend trace and conformance runner with
+   positive/negative tests; seek one external contribution or reproducibility
+   review, instead of extending the tiny ARM64 interpreter by default.
+3. Complete the Dynarmic ACCEPT/HOLD/REJECT evidence gate (#2) without
+   publishing untrusted post-fault JIT state.
+4. Keep the six-instruction Linux ELF/mock route as generic research only;
+   do not promote its service returns as Horizon semantics.
+5. Any device/vulnerability experiments require explicit authorization,
+   controlled non-destructive scope and private coordinated disclosure.
+6. Protect main with checks when repository administration permits.
+
