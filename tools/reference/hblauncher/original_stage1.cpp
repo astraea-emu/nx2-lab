@@ -226,8 +226,10 @@ SessionResult execute(const std::vector<U8>& code,
         if (cpu.GetPC() == kReturnSentinel) {
             require(!mem.denied && mem.svc_count == 0 &&
                     mem.other_exceptions == 0 &&
-                    cpu.GetSP() == kStackBase + kStackBytes,
-                    "unverified_return_state");
+                    cpu.GetSP() == kStackBase + kStackBytes &&
+                    cpu.GetRegister(29) == 0U &&
+                    cpu.GetRegister(30) == kReturnSentinel,
+                    "unverified_stack_frame_or_return_state");
             return {cpu.GetRegister(0), step, cpu.GetPC()};
         }
         // Deny running from any unexpected code/host address.
