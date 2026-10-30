@@ -70,6 +70,21 @@ jobs:
           print('original_hbx_app_main='+report['hbxAppMain'])
           print('guest_horizon_abi=not_claimed')
           PY
+      - name: Independently run the same original app object under QEMU AArch64
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/hbx-stage1"
+          test -s "$root/app_c.o"
+          test -s "$root/hbx_app.o"
+          sha256sum "$root/app_c.o" > "$RUNNER_TEMP/hbx-app-object.sha256"
+          aarch64-linux-gnu-gcc -static -no-pie -O2             -ffunction-sections -fdata-sections -Wl,--gc-sections             -I "$RUNNER_TEMP/hblauncher/sdk/include"             tools/reference/hblauncher/qemu_stage1_oracle.c             "$root/app_c.o" "$root/hbx_app.o" "$root/hbx_math.o"             "$root/hbx_ui_shaders.o" -lgcc             -o "$RUNNER_TEMP/hbx-stage1-qemu"
+          sha256sum "$root/app_c.o" > "$RUNNER_TEMP/hbx-app-object-after.sha256"
+          cmp "$RUNNER_TEMP/hbx-app-object.sha256"             "$RUNNER_TEMP/hbx-app-object-after.sha256"
+          qemu-aarch64 "$RUNNER_TEMP/hbx-stage1-qemu" |
+            tee "$RUNNER_TEMP/hbx-stage1-qemu.txt"
+          for line in             'HBX_QEMU_ORIGINAL_STAGE1_ORACLE_PASS'             'hbx_original_valid_ret=0'             'hbx_original_bad_magic_ret=2'             'hbx_original_bad_version_ret=2'             'hbx_original_bad_size_ret=2'             'upstream_app_object=unchanged_hbx_build_output'             'horizon_services_executed=0'; do
+            grep -Fx "$line" "$RUNNER_TEMP/hbx-stage1-qemu.txt"
+          done
       - name: Build research-only NX2 Dynarmic guest adapter
         run: |
           cmake -S tools/reference/hblauncher \
@@ -118,5 +133,26 @@ jobs:
                   if line.startswith('hbx_original_instructions_retired=')]
           if len(values)!=1 or not 2<=values[0]<=4096:
               raise SystemExit('missing genuine original AArch64 instruction progress')
+          oracle = (temp/'hbx-stage1-qemu.txt').read_text().splitlines()
+          keys = ('hbx_original_valid_ret', 'hbx_original_bad_magic_ret',
+                  'hbx_original_bad_version_ret', 'hbx_original_bad_size_ret')
+          def values(source):
+              out = {}
+              for line in source:
+                  if '=' not in line:
+                      continue
+                  key, value = line.split('=', 1)
+                  if key in keys:
+                      if key in out:
+                          raise SystemExit('duplicate stage-1 return field: '+key)
+                      out[key] = value
+              if set(out) != set(keys):
+                  raise SystemExit('incomplete independent stage-1 comparison')
+              return out
+          if values(lines) != values(oracle):
+              raise SystemExit('NX2/QEMU original HBX stage-1 results diverged')
+          print('NX2_HBX_STAGE1_QEMU_ORACLE_PARITY_PASS')
+          print('original_external_object_reused=yes')
+          print('qemu_console_or_horizon_evidence=none')
           print('NX2_HBX_STAGE1_CI_ACCEPTED')
           PY
