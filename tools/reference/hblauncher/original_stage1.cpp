@@ -309,10 +309,39 @@ SessionResult execute(const std::vector<U8>& code,
                 auto expected_caller = original_caller_stack;
                 put_le(expected_caller, kStackBytes - 16, 0, 8);
                 put_le(expected_caller, kStackBytes - 8, kReturnSentinel, 8);
-                require(result.caller_stack_writes == 1 &&
-                        mem.regions[4].bytes == expected_caller &&
-                        mem.regions[3].bytes != original_app_stack,
-                        "original_crt0_caller_frame_or_app_stack_mismatch");
+                // A backend may report STP as one 16-byte callback or
+                // two 8-byte callbacks. Require the *exact same 16 guest
+                // bytes and addresses*, not a particular callback width.
+                // No other caller-stack address may be written.
+                const U64 frame_low = kCallerStackBase + kStackBytes - 16;
+                const U64 frame_high = kCallerStackBase + kStackBytes;
+                bool all_frame_effects_exact = true;
+                for (const auto& effect : mem.effects) {
+                    if (effect.guest_address < kCallerStackBase ||
+                        effect.guest_address >= frame_high) continue;
+                    const U64 low = effect.guest_address;
+                    const U64 high = low + effect.width;
+                    if (low < frame_low || high > frame_high) {
+                        all_frame_effects_exact = false;
+                        break;
+                    }
+                    for (unsigned i = 0; i < effect.width; ++i) {
+                        const auto offset = static_cast<std::size_t>(
+                            low + i - kCallerStackBase);
+                        if (effect.bytes[i] != expected_caller[offset]) {
+                            all_frame_effects_exact = false;
+                            break;
+                        }
+                    }
+                }
+                require(result.caller_stack_writes >= 1 &&
+                        result.caller_stack_writes <= 2 &&
+                        all_frame_effects_exact,
+                        "original_crt0_caller_effect_callback_bounds");
+                require(mem.regions[4].bytes == expected_caller,
+                        "original_crt0_saved_frame_bytes_drift");
+                require(mem.regions[3].bytes != original_app_stack,
+                        "original_crt0_app_stack_not_used");
             } else {
                 require(result.caller_stack_writes == 0 &&
                         mem.regions[4].bytes == original_caller_stack,
