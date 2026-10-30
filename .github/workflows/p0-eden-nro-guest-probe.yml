@@ -19,6 +19,13 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Verify binary-safe guest-log assessor before expensive build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 \
+            -p test_assess_eden_guest.py
+          echo 'NX2_EDEN_GUEST_LOG_ASSESSOR_UNIT_PASS'
       - name: Install supported Linux compiler and CLI dependencies
         shell: bash
         run: |
@@ -141,35 +148,17 @@ jobs:
             --null-render --singlecore --game "$RUNNER_TEMP/bad-magic.nro" >"$RUNNER_TEMP/bad-guest.log" 2>&1
           bad_rc=$?
           set -e
-          echo "NX2_GOOD_NRO_PROCESS_EXIT=$good_rc"
-          echo "NX2_BAD_NRO_PROCESS_EXIT=$bad_rc"
-          echo '=== Bounded positive source-authored NRO: diagnostic lines ==='
-          grep -Ei 'NRO|Homebrew|Loader|svc|thread|error|fault|Hola desde|Contador|fibonacci|Failed|NX2' \
-            "$RUNNER_TEMP/good-guest.log" | tail -n 70 || true
-          echo '=== Bounded malformed-NRO control: diagnostic lines ==='
-          grep -Ei 'NRO|Homebrew|Loader|svc|thread|error|fault|Failed|NX2' \
-            "$RUNNER_TEMP/bad-guest.log" | tail -n 35 || true
-          test "$bad_rc" -ne 0
-          test "$bad_rc" -ne 124
-          test "$bad_rc" -ne 137
-          if grep -Fq 'Hola desde un NRO en NeXo 2!' "$RUNNER_TEMP/good-guest.log"; then
-            echo 'NX2_EDEN_GUEST_AUTHORED_DEBUG_STRING_OBSERVED'
-          else
-            echo 'NX2_EDEN_GUEST_EXECUTION_NOT_VERIFIED: expected original guest output absent'
-            exit 1
-          fi
-          echo 'NX2_EDEN_SOURCE_AUTHORED_GUEST_EXECUTION_PASS'
-          # Secondary, stricter original-program progression measurements. Absence
-          # of later results is reported, not misrepresented as a full guest exit.
-          for marker in \
-            'Loader: X1=' \
-            'Contador (.data): 42' \
-            'Suma en el heap: 499500' \
-            'fibonacci(50) = 12586269025' \
-            'Adios! (main devuelve -> svcExitProcess)'; do
-            if grep -Fq "$marker" "$RUNNER_TEMP/good-guest.log"; then
-              echo "NX2_EDEN_GUEST_MARKER_OBSERVED=$marker"
-            else
-              echo "NX2_EDEN_GUEST_MARKER_NOT_OBSERVED=$marker"
-            fi
-          done
+          python3 tools/reference/eden_ns2/assess_eden_guest.py \
+            --good-log "$RUNNER_TEMP/good-guest.log" \
+            --bad-log "$RUNNER_TEMP/bad-guest.log" \
+            --good-exit "$good_rc" --bad-exit "$bad_rc"
+      - name: Preserve bounded guest trial logs for independent review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-nro-guest-logs
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/good-guest.log
+            ${{ runner.temp }}/bad-guest.log
