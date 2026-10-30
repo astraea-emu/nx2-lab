@@ -11,7 +11,7 @@
 
 ## Gate acceptance
 
-The opt-in PR workflow `.github/workflows/p0-nexo-runtime-qualification.yml` pins the full upstream SHA and original test image Git blob. It disables app UI, JIT, Vulkan and TLS, then compiles the genuine candidate core and the NX2-owned independent tests.
+The opt-in PR workflow `.github/workflows/p0-nexo-runtime-qualification.yml` pins the full upstream SHA and original test image Git blob. It disables app UI, JIT and TLS; it compiles the Vulkan backend with the upstream-pinned Vulkan-Headers and volk gitlinks (no GPU execution), then compiles the genuine candidate core and the NX2-owned independent tests.
 
 1. **Positive:** unchanged external guest NRO loads, returns a valid source-defined guest entry, executes through CPU/HLE, exits, and produces the expected data counter 42, heap sum 499500, Fibonacci(50) 12586269025 and 2 MiB heap size.
 2. **Negative:** an undersized NRO, corrupted NRO0 magic and truncated original file must each be rejected by the candidate loader.
@@ -19,6 +19,12 @@ The opt-in PR workflow `.github/workflows/p0-nexo-runtime-qualification.yml` pin
 4. **Independent corroboration:** original upstream Nro_* tests run against the same pinned checkout, including the author's malformed-input and execution routes.
 
 Only a green **exact-PR-head** external workflow proves this narrow milestone. A clone, source review, or passing existing upstream badge alone does not qualify. Failure is a useful engineering result and must be preserved; do not replace it with mocks.
+
+## Observed negative build case — October 30
+
+- [Initial external CI run](https://github.com/astraea-emu/nx2-lab/actions/runs/41092044244) successfully fetched the exact NeXo source, validated the NRO blob, and configured under Ubuntu 24.04 / GCC 13.
+- **Build FAILED** in the upstream `src/video_core/gpu.cpp` with Vulkan disabled: `std::unique_ptr` destructors for incomplete `NeXo2::GPU::Vulkan::Device` and `VulkanRasterizer`. This is an upstream feature-flag build limitation, not evidence that the NRO cannot run.
+- The second attempt uses only the exact upstream-pinned Vulkan-Headers and volk gitlinks and compiles Vulkan; it still does **not** run GPU execution, import game data, enable JIT or adopt NeXo as the product engine. Preserve the failure as a comparison datum, even if the corrected lane succeeds.
 
 ## Explicit remaining gaps
 
