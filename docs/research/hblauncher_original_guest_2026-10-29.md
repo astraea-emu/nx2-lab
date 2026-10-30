@@ -54,6 +54,37 @@ services, general ARM64 application support, complete backend memory rollback,
 HBX rendering/input stages, or an emulator reaching a guest frame. Without
 independent hardware measurements, device-specific claims remain unsupported.
 
+## Independent original-function reference (2026-10-30, verified host experiment)
+
+The next experiment compiles a host-only QEMU AArch64 **reference**
+executable from the *same original `app_c.o` object produced by the pinned
+HBLauncher `hbx-build.py`*. NX2 adds only a small, separately authored
+Linux harness that prepares HBX v3 context values and directly calls the
+external `hbx_app_main`. The original upstream object is unchanged; CI
+records its digest before and after the reference build.
+
+The QEMU harness exercises valid stage 1, wrong magic, wrong ABI version
+and wrong context size. CI parses each exact returned status and compares
+the QEMU outputs with the **independent NX2 Dynarmic guest adapter**.
+The verified initial run reported QEMU/NX2 0/2/2/2 return-status parity,
+`NX2_HBX_STAGE1_QEMU_ORACLE_PARITY_PASS`, and **777 original NX2
+instruction steps**. The QEMU harness itself is a conventional Linux
+process; this does not imply identical full machine states or console
+execution.
+No fallback to expected-value-only testing is permitted: equality of
+both actual output sets is required, plus the existing source-defined
+positive and negative checks.
+
+**Evidence boundary:** QEMU is running an ARM64 Linux process, including
+normal C runtime/stdio system calls for the test harness; NX2 invokes no
+host/guest service at all. Neither path is a Switch 2 Horizon emulator,
+console reference observation, or a full `_start` entry test.
+
+**Not yet established:** ABI-preserved original `_start` trampoline,
+exact CPU and guest memory trace parity beyond returned statuses, and
+physical Switch 2 behavior. This is a narrow but independent E3 semantic
+oracle, not a device verification substitute.
+
 ## Next dependency
 
 After an actual stage-1 positive result, qualify the original `_start`

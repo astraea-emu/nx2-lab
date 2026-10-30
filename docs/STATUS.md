@@ -98,8 +98,13 @@ unmapped pointers, denied writable stack, invalid entry and instruction budget
 were rejected. Original code/data image SHA-256 values were checked.
 No native host service, Nintendo Horizon service or console was invoked.
 **This is not yet a full HBX app launch, Switch 2 Horizon implementation,
-or game.** Full original `_start` entry/return semantics and an independent
-QEMU stage-1 oracle comparison remain unproven.
+or game.** Full original `_start` entry/return semantics remain unproven.
+An independently compiled QEMU AArch64 reference now executes the **same
+original HBLauncher app object** used by the NX2 Dynarmic guest adapter.
+Exact source-defined stage-1 results matched for valid context and invalid
+magic/version/size (0/2/2/2); 777 original instructions retired in NX2.
+The QEMU comparison is **host-only** and directly enters the C function;
+it does not prove the full `_start` trampoline or real Horizon/device ABI.
 
 ## First native-facing independent research target (host-only)
 
