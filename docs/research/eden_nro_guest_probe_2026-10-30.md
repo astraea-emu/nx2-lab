@@ -30,6 +30,19 @@ A passed run proves only the original, source-authored Switch 1-style guest reac
 
 [Initial run #41120419704](https://github.com/astraea-emu/nx2-lab/actions/runs/41120419704) completed the original upstream C++ compilation and linked **`bin/eden-cli` at step 1443/1443**. The CI job nevertheless failed because the NX2-authored workflow incorrectly required `bin/yuzu-cmd` despite the CMake target being named `yuzu-cmd`; no guest trial was executed in that run. The corrected workflow checks and invokes `bin/eden-cli`, without modifying the emulator source, guest binary or evidence threshold.
 
+## First actual guest trial — bounded timeouts and masked logs
+
+[Exact-head run #41123961589](https://github.com/astraea-emu/nx2-lab/actions/runs/41123961589) compiled the full original `bin/eden-cli` target at Ninja step **1443/1443**. It then executed the *actual* positive and corrupt-magic NRO process trials; neither met the acceptance criteria:
+
+- Original valid NRO process returned **124**, the 22-second GNU `timeout` result. A clean natural exit was not observed.
+- Mutated invalid-magic NRO returned **137**, consistent with forced termination after the bounded timeout. This **does not prove rejection** by the upstream loader.
+- The shell diagnostic used `grep` on the positive log, which reported **"binary file matches"** rather than showing any matching lines. No original guest-generated output was captured in the job logs, so **guest execution remains unverified**, even if the captured binary file might have contained it.
+- The first job stopped on the invalid-control exit requirement before checking or reporting the positive guest marker.
+
+The next revision retains **both failure statuses**, uses an NX2-authored binary-safe Python assessor with local unit regressions, reports all original guest progress markers regardless of the negative result, preserves raw positive/negative log files as a short-lived GitHub Actions artifact, and requires an explicit upstream loader-error diagnostic **plus prompt non-timeout termination** for the invalid input. It does not automatically treat any nonzero exit or a crash as successful rejection. The original loader, guest binary, source revisions and test acceptance threshold remain unchanged.
+
+**No claim of guest CPU execution or correct malformed-input rejection can be made until that exact new run has completed and the captured logs are inspected.**
+
 ## Next engineering decision
 
 If the first CI run fails, read the original launcher or guest service logs and identify the **first specific blocker**. Improve the test only if evidence establishes a safe necessary correction, documenting the entire change. If the original NRO successfully executes, retain this as the frozen Switch 1 homebrew control and proceed to a genuinely Switch 2-facing source-owned image or API contract, with hardware observations as a separate authorized evidence lane. Issue #21 stays HOLD for engine selection until that stronger gate is met.
