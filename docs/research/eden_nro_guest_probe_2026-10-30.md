@@ -26,6 +26,10 @@ The next real gate is to execute a source-authored ARM64 homebrew application th
 
 A passed run proves only the original, source-authored Switch 1-style guest reached a guest-generated debug output through an Eden-derived CPU/HLE path. It would **not** prove Switch 2-native software, GPU rendering, a Nintendo game, legal device observations, Apple Silicon compatibility or readiness to select Eden-NS2 as production architecture.
 
+## First completed build attempt (source compiled; incorrect artifact-path assertion)
+
+[Initial run #41120419704](https://github.com/astraea-emu/nx2-lab/actions/runs/41120419704) completed the original upstream C++ compilation and linked **`bin/eden-cli` at step 1443/1443**. The CI job nevertheless failed because the NX2-authored workflow incorrectly required `bin/yuzu-cmd` despite the CMake target being named `yuzu-cmd`; no guest trial was executed in that run. The corrected workflow checks and invokes `bin/eden-cli`, without modifying the emulator source, guest binary or evidence threshold.
+
 ## Next engineering decision
 
 If the first CI run fails, read the original launcher or guest service logs and identify the **first specific blocker**. Improve the test only if evidence establishes a safe necessary correction, documenting the entire change. If the original NRO successfully executes, retain this as the frozen Switch 1 homebrew control and proceed to a genuinely Switch 2-facing source-owned image or API contract, with hardware observations as a separate authorized evidence lane. Issue #21 stays HOLD for engine selection until that stronger gate is met.
