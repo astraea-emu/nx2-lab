@@ -21,7 +21,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build git clang libboost-dev python3 \
-            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu qemu-user
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libc6-dev-arm64-cross qemu-user
       - name: Freeze independent HBLauncher and Dynarmic revisions
         env:
           HBX_SHA: 18b4748ba98eeac7df17beb5d3418985eb74897c
