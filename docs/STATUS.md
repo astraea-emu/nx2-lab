@@ -98,7 +98,14 @@ unmapped pointers, denied writable stack, invalid entry and instruction budget
 were rejected. Original code/data image SHA-256 values were checked.
 No native host service, Nintendo Horizon service or console was invoked.
 **This is not yet a full HBX app launch, Switch 2 Horizon implementation,
-or game.** Full original `_start` entry/return semantics remain unproven.
+or game.** Original HBX `_start` execution has now passed the pinned E3 test:
+**795 original AArch64 instructions** retired via the genuine upstream
+trampoline, compared with 777 for direct function entry. Separate incoming
+caller and context-provided application stacks are enforced. Original code
+restored SP, X29 and X30, returned the source-defined stage-1 outcomes, and
+preserved independent QEMU return parity. A prior aliasing-stack attempt
+failed closed at an unsupported guest PC and was not promoted. This remains
+a custom **HBX** test, not Nintendo Horizon process entry or hardware parity.
 An independently compiled QEMU AArch64 reference now executes the **same
 original HBLauncher app object** used by the NX2 Dynarmic guest adapter.
 Exact source-defined stage-1 results matched for valid context and invalid
