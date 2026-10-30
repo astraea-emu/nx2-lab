@@ -98,7 +98,12 @@ unmapped pointers, denied writable stack, invalid entry and instruction budget
 were rejected. Original code/data image SHA-256 values were checked.
 No native host service, Nintendo Horizon service or console was invoked.
 **This is not yet a full HBX app launch, Switch 2 Horizon implementation,
-or game.** Full original `_start` entry/return semantics remain unproven.
+or game.** Original HBX `_start` entry/return semantics are the next **draft**
+execution test. It enters the unchanged `_start` from the compiled upstream
+image rather than directly entering the C function; the trusted adapter
+checks return SP, x29 and x30 and compares actual guest return codes with
+the independent QEMU stage-1 oracle. Do not count this as passed until
+final-head E3 CI succeeds.
 An independently compiled QEMU AArch64 reference now executes the **same
 original HBLauncher app object** used by the NX2 Dynarmic guest adapter.
 Exact source-defined stage-1 results matched for valid context and invalid
