@@ -135,7 +135,7 @@ jobs:
           binary="$RUNNER_TEMP/eden-build/bin/yuzu-cmd"
           set +e
           timeout --signal=TERM --kill-after=5s 22s "$binary" \
-            --null-render --singlecore --game "$NRO" >"$RUNNER_TEMP/good-guest.log" 2>&1
+            --program nx2-source-probe --null-render --singlecore --game "$NRO" >"$RUNNER_TEMP/good-guest.log" 2>&1
           good_rc=$?
           timeout --signal=TERM --kill-after=5s 12s "$binary" \
             --null-render --singlecore --game "$RUNNER_TEMP/bad-magic.nro" >"$RUNNER_TEMP/bad-guest.log" 2>&1
@@ -159,3 +159,12 @@ jobs:
             exit 1
           fi
           echo 'NX2_EDEN_SOURCE_AUTHORED_GUEST_EXECUTION_PASS'
+          # Secondary, stricter original-program progression measurements. Absence
+          # of later results is reported, not misrepresented as a full guest exit.
+          for marker in             'Loader: X1='             'Contador (.data): 42'             'Suma en el heap: 499500'             'fibonacci(50) = 12586269025'             'Adios! (main devuelve -> svcExitProcess)'; do
+            if grep -Fq "$marker" "$RUNNER_TEMP/good-guest.log"; then
+              echo "NX2_EDEN_GUEST_MARKER_OBSERVED=$marker"
+            else
+              echo "NX2_EDEN_GUEST_MARKER_NOT_OBSERVED=$marker"
+            fi
+          done
