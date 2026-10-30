@@ -71,6 +71,19 @@ jobs:
           print('original_hbx_app_main='+report['hbxAppMain'])
           print('guest_horizon_abi=not_claimed')
           PY
+      - name: Attest unchanged generated HBX image and reject malformed manifests
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/hbx-stage1"
+          python3 tools/reference/hblauncher/verify_generated_image.py \
+            --report "$root/report.json" --code "$root/code.bin" \
+            --data "$root/data.bin" | tee "$RUNNER_TEMP/hbx-image-admission.txt"
+          grep -Fx 'NX2_HBX_ORIGINAL_IMAGE_ADMISSION_PASS' \
+            "$RUNNER_TEMP/hbx-image-admission.txt"
+          grep -Fx 'hbx_image_negative_cases=19' \
+            "$RUNNER_TEMP/hbx-image-admission.txt"
+          grep -Fx 'original_binary_admission=checked_against_pinned_builder_report' \
+            "$RUNNER_TEMP/hbx-image-admission.txt"
       - name: Independently run the same original app object under QEMU AArch64
         run: |
           set -euo pipefail
@@ -119,6 +132,8 @@ jobs:
               'hbx_original_bad_magic_ret=2',
               'hbx_original_bad_version_ret=2',
               'hbx_original_bad_size_ret=2',
+              'hbx_caller_stack_writes=0',
+              'hbx_full_write_ledger=two_runs_equal',
               'hbx_rejected_bad_pointer=1',
               'hbx_rejected_no_stack_write=1',
               'hbx_rejected_bad_entry=1',
@@ -167,6 +182,13 @@ jobs:
           if start_result.returncode or start_result.stderr.strip():
               raise SystemExit('original HBX _start guest execution refused')
           start_lines = start_result.stdout.splitlines()
+          original_frame_effects = [
+              int(line.split('=', 1)[1]) for line in start_lines
+              if line.startswith('hbx_caller_stack_writes=')]
+          if len(original_frame_effects) != 1 or \
+             original_frame_effects[0] not in (1, 2) or \
+             'hbx_full_write_ledger=two_runs_equal' not in start_lines:
+              raise SystemExit('original HBX CRT0 stack effects not verified')
           if 'NX2_HBX_STAGE1_ORIGINAL_GUEST_PASS' not in start_lines:
               raise SystemExit('original HBX _start missing accepted return')
           if values(start_lines) != values(oracle):
@@ -184,6 +206,9 @@ jobs:
           print('NX2_HBX_ORIGINAL_CRT0_ENTRY_PASS')
           print('hbx_crt0_original_instructions_retired='+str(start_counts[0]))
           print('hbx_crt0_return_sp_fp_lr=restored')
+          print('hbx_crt0_caller_frame_bytes=source_defined_verified')
+          print('hbx_original_image_mutations=19_rejected')
+          print('hbx_write_ledger=fresh_runs_exactly_equal')
           print('original_hbx_qemu_stage1_return_parity=checked')
 
           PY

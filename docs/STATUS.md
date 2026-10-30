@@ -82,6 +82,23 @@
 - Pound: https://github.com/pound-emu/pound — Switch-family architecture
   research and Ballistic CPU JIT effort; no published Switch 2 game run.
 
+## E3 verified guest write-effect accounting and binary intake (PR #19)
+
+Original source-pinned HBLauncher code now has a **bounded, exact guest
+write-callback ledger**. The direct stage-1 route records 777
+instructions and 252 application-stack writes. The original `_start`
+route records 795 instructions, 252 application-stack writes and
+**two 8-byte caller-stack writes** forming the exact saved 16-byte
+X29/X30 frame. Both fresh runs of each case have identical effect
+addresses, widths and bytes. All writes remain within admitted stacks;
+RX code, original data and HBX context remain unchanged.
+
+The original-image admission verifier checks SHA-256, original
+code/data size, entry and guest-mapping bounds and rejects **19**
+altered/malformed cases. This is bounded source-pinned host research,
+not a Nintendo Horizon ABI, complete architectural effect accounting
+or cryptographic trust in a potentially compromised compiler.
+
 ## Original HBX stage-1 guest execution (verified PR #16 exact-head research)
 
 A research-only pinned Dynarmic adapter now attempts to run the original
