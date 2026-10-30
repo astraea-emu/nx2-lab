@@ -1,0 +1,88 @@
+name: P0 NRO input preflight and malformed-size regressions
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p0-nro-preflight.yml'
+      - 'tools/reference/eden_ns2/nro_preflight.py'
+      - 'tools/reference/eden_ns2/test_nro_preflight.py'
+      - 'docs/research/eden_nro_input_preflight_2026-10-30.md'
+
+permissions:
+  contents: read
+
+jobs:
+  test-nro-preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: NX2-owned deterministic format and negative-input tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 \
+            -p test_nro_preflight.py
+          echo 'NX2_NRO_UNIT_PRECHECKS_PASS'
+      - name: Fetch exact original, public source-authored NRO fixture
+        shell: bash
+        env:
+          NEXO_SHA: 7fa73a5062e64370163a248d1a0b555272012c0f
+          NRO_BLOB: bb0ee2a52acd303e7c800443163aa91900eabb58
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/nexo"
+          git -C "$RUNNER_TEMP/nexo" remote add origin https://github.com/NeXoNetwork/NeXo2-emu.git
+          git -C "$RUNNER_TEMP/nexo" sparse-checkout set --no-cone \
+            tests/generated/hello.nro tests/programs/nro_hello/main.c
+          git -C "$RUNNER_TEMP/nexo" -c protocol.version=2 fetch -q \
+            --depth=1 --no-tags --filter=blob:none origin "$NEXO_SHA"
+          git -C "$RUNNER_TEMP/nexo" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/nexo" rev-parse HEAD)" = "$NEXO_SHA"
+          test "$(git -C "$RUNNER_TEMP/nexo" hash-object tests/generated/hello.nro)" = "$NRO_BLOB"
+          test "$(stat -c '%s' "$RUNNER_TEMP/nexo/tests/generated/hello.nro")" = "24636"
+          test -f "$RUNNER_TEMP/nexo/tests/programs/nro_hello/main.c"
+          echo 'NX2_NRO_VERIFIED_SOURCE_FIXTURE_PASS'
+      - name: Verify original fixture is safe and malformed variants fail closed
+        shell: bash
+        env:
+          PYTHONPATH: tools/reference/eden_ns2
+        run: |
+          set -euo pipefail
+          export NRO="$RUNNER_TEMP/nexo/tests/generated/hello.nro"
+          python3 tools/reference/eden_ns2/nro_preflight.py "$NRO"
+          python3 - <<'PY'
+          import os
+          import struct
+          from pathlib import Path
+          from nro_preflight import NroPreflightError, preflight_nro
+          original = Path(os.environ['NRO']).read_bytes()
+          layout = preflight_nro(original)
+          assert layout.copied_bytes <= len(original)
+          cases = {
+              'bad_magic': (0x10, b'NX2!'),
+              'oversized_declared_image': (0x18, struct.pack('<I', 0x800000)),
+              'mod_header_out_of_range': (4, struct.pack('<I', 0xFFFFFFFF)),
+              'oversized_data_segment': (0x34, struct.pack('<I', 0xFFFFFF00)),
+              'unbounded_bss': (0x38, struct.pack('<I', 0xFFFF0000)),
+          }
+          for name, (offset, mutation) in cases.items():
+              modified = bytearray(original)
+              modified[offset:offset+len(mutation)] = mutation
+              try:
+                  preflight_nro(bytes(modified))
+              except NroPreflightError as exc:
+                  print('NX2_NRO_NEGATIVE_REFUSED', name, str(exc))
+              else:
+                  raise AssertionError(f'Unexpectedly allowed {name}')
+          # Requires full declared rounded source-copy size, not just the header.
+          try:
+              preflight_nro(original[:layout.copied_bytes - 1])
+          except NroPreflightError as exc:
+              print('NX2_NRO_NEGATIVE_REFUSED', 'truncated_page_source', str(exc))
+          else:
+              raise AssertionError('Truncated source-copy window accepted')
+          print('NX2_NRO_ORIGINAL_AND_SIX_NEGATIVES_PASS')
+          PY
