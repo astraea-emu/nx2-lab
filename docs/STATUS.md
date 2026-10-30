@@ -82,6 +82,19 @@
 - Pound: https://github.com/pound-emu/pound — Switch-family architecture
   research and Ballistic CPU JIT effort; no published Switch 2 game run.
 
+## E3 effect accounting and binary admission (draft, awaiting final-head CI)
+
+The E3 research runner is being extended with an exact, bounded ledger of
+successful guest-memory write callbacks across two fresh runs. Its contract
+requires the source-authored code, data image and HBX context to remain
+byte-identical, all writes to remain in admitted stacks, and the original
+`_start` trampoline's caller frame to match the expected saved X29/X30
+bytes. A separate size/path-bounded checker validates the generated upstream
+code/data against its original build report and refuses 19 mutated/malformed
+inputs. These are **not** merged capabilities unless the pinned E3 job and
+all ordinary CI jobs actually pass; a compiled-image report alone is not
+independent attestation of a compromised build tool.
+
 ## Original HBX stage-1 guest execution (verified PR #16 exact-head research)
 
 A research-only pinned Dynarmic adapter now attempts to run the original
