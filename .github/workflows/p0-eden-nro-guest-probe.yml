@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 50
     env:
-      CCACHE_DIR: ${{ runner.temp }}/eden-cxx-cache
+      CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
     steps:
       - name: Checkout NX2 without persistent credentials
         uses: actions/checkout@v4
@@ -58,7 +58,7 @@ jobs:
       - name: Restore bounded frozen-source compiler cache
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/eden-cxx-cache
+          path: ${{ github.workspace }}/eden-cxx-cache
           key: eden-cli-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
           restore-keys: |
             eden-cli-ubuntu26-clang-e2f285ab-v1-
