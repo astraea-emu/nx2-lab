@@ -127,6 +127,11 @@ HBX context; source-defined writes must remain entirely within the
 mapped application stack or the independent caller stack. For the full
 upstream `_start` route, the only authorized caller-stack change is
 the original 16-byte saved frame with initial X29 and return-sentinel X30.
+The first experimental run rejected an overly rigid *one callback* expectation:
+the CPU backend may split a 16-byte AArch64 STP into two 8-byte memory
+callbacks. The corrected gate allows **one or two** callbacks only when
+every written byte and address exactly matches the original saved frame;
+other caller-stack writes, extra bytes and missing frame contents fail.
 The direct-C-function route must not modify the independent caller stack.
 
 The separately bounded host intake checker reads the *actual* generated
