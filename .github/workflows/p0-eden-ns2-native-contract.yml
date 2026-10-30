@@ -1,0 +1,88 @@
+name: P0 frozen Eden-NS2 native interface contracts (Linux)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p0-eden-ns2-native-contract.yml'
+      - 'tools/reference/eden_ns2/**'
+      - 'docs/research/runtime_baseline_eden_ns2_2026-10-30.md'
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    name: Compile exact upstream native service/GPU code and NX2 negative tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Checkout only frozen source headers (no upstream code execution)
+        shell: bash
+        env:
+          EDEN_SHA: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
+        run: |
+          set -euo pipefail
+          dst="$RUNNER_TEMP/eden-ns2"
+          mkdir -p "$dst"
+          git -C "$dst" init -q
+          git -C "$dst" remote add origin https://github.com/0x2593/Eden-NS2.git
+          git -C "$dst" sparse-checkout set --no-cone \
+            src/common/common_types.h \
+            src/core/hle/service/am/service/graphics_supervisor_protocol.h \
+            src/core/hle/service/am/service/graphics_syncpoint_cache.h \
+            src/core/hle/service/am/service/native_image_layout.h \
+            src/core/hle/service/am/service/native_video_layout.h \
+            src/core/hle/service/nvdrv/devices/gpu_address_space_layout.h \
+            src/video_core/native_semaphore.h
+          git -C "$dst" -c protocol.version=2 fetch --quiet --no-tags \
+            --depth=1 --filter=blob:none origin "$EDEN_SHA"
+          git -C "$dst" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$dst" rev-parse HEAD)" = "$EDEN_SHA"
+          while read -r path expected; do
+            test -f "$dst/$path"
+            actual="$(git -C "$dst" hash-object "$path")"
+            if [ "$actual" != "$expected" ]; then
+              echo "EDEN_SOURCE_DIGEST_REFUSED file=$path"
+              exit 1
+            fi
+          done <<'BLOBS'
+          src/common/common_types.h 6e7e4ec0d9cfeaf369e51f8a198fb2d769c199cb
+          src/core/hle/service/am/service/graphics_supervisor_protocol.h ad8bd40fce19716b4eec808fb9daac68e70cd1e8
+          src/core/hle/service/am/service/graphics_syncpoint_cache.h 23361b006ca699197401d4aeb9ffc9f6656883d6
+          src/core/hle/service/am/service/native_image_layout.h 38cd02254556df3a77474906b8423d8f4e3e4823
+          src/core/hle/service/am/service/native_video_layout.h b614d0e78b73533737b9b52ebe2f5a13f36f4a62
+          src/core/hle/service/nvdrv/devices/gpu_address_space_layout.h 8be7ab173cbde493b40b0781b9c0f63c20396f9d
+          src/video_core/native_semaphore.h 1ba7451c51579bfaa3bd19ffa8cdd83e3b6a1f77
+          BLOBS
+          test -z "$(git -C "$dst" status --porcelain --untracked-files=no)"
+          echo "NX2_EDEN_NS2_EXACT_ORIGINAL_HEADER_INTAKE_PASS"
+          echo "source_revision=$EDEN_SHA"
+      - name: Compile original Eden-NS2 service/GPU header implementations (GNU C++)
+        shell: bash
+        run: |
+          set -euo pipefail
+          c++ -std=c++23 -O2 -Wall -Wextra -Werror -pedantic \
+            -I "$RUNNER_TEMP/eden-ns2/src" \
+            tools/reference/eden_ns2/native_contract_probe.cpp \
+            -o "$RUNNER_TEMP/eden-ns2-probe"
+          "$RUNNER_TEMP/eden-ns2-probe" | tee "$RUNNER_TEMP/eden-probe-output.txt"
+          grep -E '^NX2_EDEN_NS2_NATIVE_CONTRACT_PASS assertions=[1-9][0-9]*$' \
+            "$RUNNER_TEMP/eden-probe-output.txt"
+      - name: Repeat with Clang and runtime sanitizers
+        shell: bash
+        run: |
+          set -euo pipefail
+          clang++ -std=c++23 -O1 -g -fno-omit-frame-pointer \
+            -fsanitize=address,undefined -fno-sanitize-recover=all \
+            -I "$RUNNER_TEMP/eden-ns2/src" \
+            tools/reference/eden_ns2/native_contract_probe.cpp \
+            -o "$RUNNER_TEMP/eden-ns2-probe-sanitized"
+          ASAN_OPTIONS=detect_leaks=1 \
+            "$RUNNER_TEMP/eden-ns2-probe-sanitized" \
+            | tee "$RUNNER_TEMP/eden-sanitized-output.txt"
+          grep -E '^NX2_EDEN_NS2_NATIVE_CONTRACT_PASS assertions=[1-9][0-9]*$' \
+            "$RUNNER_TEMP/eden-sanitized-output.txt"
