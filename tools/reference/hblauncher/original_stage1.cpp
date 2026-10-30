@@ -20,6 +20,7 @@ using U8 = std::uint8_t;
 using U64 = std::uint64_t;
 constexpr U64 kContextBase = 0x30000000ULL;
 constexpr U64 kStackBase = 0x50000000ULL;
+constexpr U64 kCallerStackBase = 0x51000000ULL;
 constexpr U64 kReturnSentinel = 0x60000000ULL;
 constexpr std::size_t kContextBytes = 4096;
 constexpr std::size_t kStackBytes = 64 * 1024;
@@ -101,6 +102,10 @@ public:
         regions.push_back({kContextBase, std::move(ctx), true, false, false});
         regions.push_back({kStackBase, std::vector<U8>(kStackBytes, 0), true,
                            scenario != "no_stack_write", false});
+        // HBX _start saves its own caller frame before switching to the
+        // context-supplied app stack. Those two stacks MUST NOT alias.
+        regions.push_back({kCallerStackBase,
+                           std::vector<U8>(kStackBytes, 0), true, true, false});
     }
 
     // Refuse partial, overlapping, out-of-range, or denied accesses.
@@ -217,7 +222,12 @@ SessionResult execute(const std::vector<U8>& code,
     conf.code_cache_size = 8 * 1024 * 1024; // bounded research-only allocation
     Dynarmic::A64::Jit cpu(conf);
     cpu.SetPC(entry);
-    cpu.SetSP(kStackBase + kStackBytes);
+    // In the original CRT0 route the incoming host-caller stack is
+    // independent of ctx->stack_base. Direct app-function calls retain
+    // the existing test stack to preserve earlier regression semantics.
+    const U64 caller_sp = (entry == code_base)
+        ? kCallerStackBase + kStackBytes : kStackBase + kStackBytes;
+    cpu.SetSP(caller_sp);
     cpu.SetRegister(0, scenario == "bad_pointer" ?
         0x70000000ULL : kContextBase);
     cpu.SetRegister(30, kReturnSentinel);
@@ -226,7 +236,7 @@ SessionResult execute(const std::vector<U8>& code,
         if (cpu.GetPC() == kReturnSentinel) {
             require(!mem.denied && mem.svc_count == 0 &&
                     mem.other_exceptions == 0 &&
-                    cpu.GetSP() == kStackBase + kStackBytes &&
+                    cpu.GetSP() == caller_sp &&
                     cpu.GetRegister(29) == 0U &&
                     cpu.GetRegister(30) == kReturnSentinel,
                     "unverified_stack_frame_or_return_state");
