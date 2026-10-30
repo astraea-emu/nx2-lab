@@ -69,6 +69,15 @@ struct Mapping {
     bool executable;
 };
 
+// Exact, bounded guest *write callbacks*, not a claim that every JIT
+// microarchitectural effect is known. Used to compare repeated source runs.
+struct WriteEffect {
+    U64 guest_address = 0;
+    std::array<U8, 16> bytes{};
+    unsigned width = 0;
+    bool operator==(const WriteEffect&) const = default;
+};
+
 class OwnedMemoryCallbacks final : public Dynarmic::A64::UserCallbacks {
 public:
     std::vector<Mapping> regions;
@@ -76,6 +85,21 @@ public:
     unsigned svc_count = 0;
     unsigned other_exceptions = 0;
     unsigned successful_writes = 0;
+    std::vector<WriteEffect> effects;
+    static constexpr std::size_t kMaxEffects = 4096;
+
+    void record_write(U64 address, const U8* bytes, unsigned size) {
+        if (effects.size() >= kMaxEffects || size == 0 || size > 16) {
+            denied = true;
+            return;
+        }
+        WriteEffect effect;
+        effect.guest_address = address;
+        effect.width = size;
+        std::copy_n(bytes, size, effect.bytes.begin());
+        effects.push_back(effect);
+        ++successful_writes;
+    }
 
     OwnedMemoryCallbacks(std::vector<U8> code, std::vector<U8> data,
                          U64 code_base, U64 data_base, std::size_t data_extent,
@@ -158,7 +182,7 @@ public:
         if (!ptr) return;
         for (unsigned i = 0; i < size; ++i)
             ptr[i] = static_cast<U8>(value >> (i * 8U));
-        ++successful_writes;
+        record_write(addr, ptr, size);
     }
     std::uint8_t MemoryRead8(U64 a) override { return static_cast<U8>(read(a, 1)); }
     std::uint16_t MemoryRead16(U64 a) override { return static_cast<std::uint16_t>(read(a, 2)); }
@@ -185,7 +209,7 @@ public:
             p[i] = static_cast<U8>(v[0] >> (i * 8));
             p[i + 8] = static_cast<U8>(v[1] >> (i * 8));
         }
-        ++successful_writes;
+        record_write(a, p, 16);
     }
     void InterpreterFallback(U64, std::size_t) override { denied = true; }
     void CallSVC(std::uint32_t) override { ++svc_count; denied = true; }
@@ -201,6 +225,9 @@ struct SessionResult {
     U64 result = 0;
     U64 retired = 0;
     U64 end_pc = 0;
+    std::vector<WriteEffect> guest_write_effects{};
+    std::size_t app_stack_writes = 0;
+    std::size_t caller_stack_writes = 0;
     bool operator==(const SessionResult&) const = default;
 };
 
@@ -211,6 +238,14 @@ SessionResult execute(const std::vector<U8>& code,
     if (scenario == "bad_entry") entry = code_base + code.size();
     OwnedMemoryCallbacks mem(code, data, code_base, data_base, data_extent,
                              scenario);
+    // Keep controller-owned preimages across guest execution. The original
+    // code and source-defined context must remain byte-identical, even if
+    // an accidental callback would try writing outside its permissions.
+    const auto original_code = mem.regions[0].bytes;
+    const auto original_data = mem.regions[1].bytes;
+    const auto original_context = mem.regions[2].bytes;
+    const auto original_app_stack = mem.regions[3].bytes;
+    const auto original_caller_stack = mem.regions[4].bytes;
     Dynarmic::A64::UserConfig conf{};
     conf.callbacks = &mem;
     conf.fastmem_pointer = std::nullopt;
@@ -240,7 +275,50 @@ SessionResult execute(const std::vector<U8>& code,
                     cpu.GetRegister(29) == 0U &&
                     cpu.GetRegister(30) == kReturnSentinel,
                     "unverified_stack_frame_or_return_state");
-            return {cpu.GetRegister(0), step, cpu.GetPC()};
+            require(mem.regions[0].bytes == original_code &&
+                    mem.regions[1].bytes == original_data &&
+                    mem.regions[2].bytes == original_context,
+                    "immutable_original_image_or_context_changed");
+            require(mem.successful_writes == mem.effects.size() &&
+                    !mem.effects.empty(),
+                    "unaccounted_guest_write_effects");
+            SessionResult result{};
+            result.result = cpu.GetRegister(0);
+            result.retired = step;
+            result.end_pc = cpu.GetPC();
+            result.guest_write_effects = mem.effects;
+            for (const auto& effect : mem.effects) {
+                const U64 low = effect.guest_address;
+                const U64 high = low + effect.width;
+                if (low >= kStackBase &&
+                    high <= kStackBase + kStackBytes) {
+                    ++result.app_stack_writes;
+                } else if (low >= kCallerStackBase &&
+                           high <= kCallerStackBase + kStackBytes) {
+                    ++result.caller_stack_writes;
+                } else {
+                    throw std::runtime_error("write_outside_trusted_stacks");
+                }
+            }
+            require(result.app_stack_writes != 0,
+                    "missing_actual_app_stack_effect");
+            if (entry == code_base) {
+                // Original upstream crt0.S stp x29,x30,[sp,#-16]! and
+                // later ldp ...; its preserved caller frame remains in
+                // guest memory even though SP/X29/X30 are restored.
+                auto expected_caller = original_caller_stack;
+                put_le(expected_caller, kStackBytes - 16, 0, 8);
+                put_le(expected_caller, kStackBytes - 8, kReturnSentinel, 8);
+                require(result.caller_stack_writes == 1 &&
+                        mem.regions[4].bytes == expected_caller &&
+                        mem.regions[3].bytes != original_app_stack,
+                        "original_crt0_caller_frame_or_app_stack_mismatch");
+            } else {
+                require(result.caller_stack_writes == 0 &&
+                        mem.regions[4].bytes == original_caller_stack,
+                        "direct_function_modified_other_caller_stack");
+            }
+            return result;
         }
         // Deny running from any unexpected code/host address.
         require(cpu.GetPC() >= code_base &&
@@ -271,6 +349,13 @@ void check_case(const std::vector<U8>& code, const std::vector<U8>& data,
     if (std::string(name) == "valid") {
         std::cout << "hbx_original_instructions_retired=" <<
             first.retired << '\n';
+        std::cout << "hbx_guest_write_effects=" <<
+            first.guest_write_effects.size() << '\n';
+        std::cout << "hbx_app_stack_writes=" <<
+            first.app_stack_writes << '\n';
+        std::cout << "hbx_caller_stack_writes=" <<
+            first.caller_stack_writes << '\n';
+        std::cout << "hbx_full_write_ledger=two_runs_equal" << '\n';
     }
 }
 void refuse_case(const std::vector<U8>& code, const std::vector<U8>& data,
