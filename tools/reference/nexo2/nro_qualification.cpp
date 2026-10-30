@@ -13,7 +13,7 @@
 #endif
 
 namespace {
-std::vector<NeXo2::u8> FrozenNro() {
+std::vector<std::uint8_t> FrozenNro() {
     std::ifstream f(std::string(NEXO2_TEST_DATA_DIR) + "/hello.nro", std::ios::binary);
     return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
 }
@@ -44,14 +44,14 @@ TEST(Nx2_NroRejectsDamagedImage) {
     CHECK_EQ(original.size(), 24636U);
     if (original.size() != 24636U) return;
     NeXo2::Core::System too_short;
-    CHECK(!too_short.LoadNro(std::vector<NeXo2::u8>(16, 0), "short.nro"));
+    CHECK(!too_short.LoadNro(std::vector<std::uint8_t>(16, 0), "short.nro"));
     CHECK(!too_short.GetLastError().empty());
     auto invalid_magic = original;
     invalid_magic.at(0x10) = 'X';
     NeXo2::Core::System bad_magic;
     CHECK(!bad_magic.LoadNro(invalid_magic, "bad-magic.nro"));
     CHECK(bad_magic.GetLastError().find("NRO0") != std::string::npos);
-    std::vector<NeXo2::u8> truncated(original.begin(), original.begin() + 0x200);
+    std::vector<std::uint8_t> truncated(original.begin(), original.begin() + 0x200);
     NeXo2::Core::System incomplete;
     CHECK(!incomplete.LoadNro(truncated, "incomplete.nro"));
     CHECK(!incomplete.GetLastError().empty());
@@ -60,7 +60,7 @@ TEST(Nx2_NroRejectsDamagedImage) {
 TEST(Nx2_UnsupportedSvcDoesNotPretendToSucceed) {
     NeXo2::Core::System sys;
     // Synthetic unsupported probe, NOT part of the original NRO program.
-    constexpr NeXo2::u32 program[] = {0xD40005C1U}; // SVC #0x2e
+    constexpr std::uint32_t program[] = {0xD40005C1U}; // SVC #0x2e
     sys.LoadRawProgram(program, 1, NeXo2::HLE::Layout::CODE_BASE);
     CHECK(sys.Run(10) <= 10);
     CHECK(sys.GetCpu().IsHalted());
