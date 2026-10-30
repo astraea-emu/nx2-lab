@@ -5,7 +5,12 @@ on:
   pull_request:
     paths:
       - '.github/workflows/p0-eden-nro-guest-probe.yml'
-      - 'docs/research/eden_nro_guest_probe_2026-10-30.md'
+      - 'tools/reference/eden_ns2/assess_eden_guest.py'
+      - 'tools/reference/eden_ns2/test_assess_eden_guest.py'
+
+concurrency:
+  group: eden-nro-guest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
