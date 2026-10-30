@@ -195,9 +195,12 @@ jobs:
           else
             # A failing assertion in the added case is the expected source bug;
             # a crash, no-test match, unrelated test or missing log is NOT proof.
-            grep -Fq 'NX2 native NPDM reload clears Switch 2 identity' \
-              "$RUNNER_TEMP/npdm-before.log"
-            grep -Fq 'metadata.IsSwitch2()' "$RUNNER_TEMP/npdm-before.log"
+            # Catch2 compact prints the failing expression and count, not the
+            # TEST_CASE title. Only accept the exact original assertion failure.
+            test "$rc" -eq 42
+            grep -Fq 'failed: !(metadata.IsSwitch2()) for: !true' "$RUNNER_TEMP/npdm-before.log"
+            grep -Fq 'test cases: 1 | 1 failed' "$RUNNER_TEMP/npdm-before.log"
+            grep -Fq 'assertions: 6 | 5 passed | 1 failed' "$RUNNER_TEMP/npdm-before.log"
             echo 'NX2_NPDM_ORIGINAL_STALE_SWITCH2_FLAG_REPRODUCED'
           fi
       - name: Apply exact one-line isolated GPL-side correction if regression demonstrated
