@@ -1,0 +1,44 @@
+name: Competitive radar (metadata only)
+
+on:
+  schedule:
+    # Weekly Monday at an off-peak UTC minute; GitHub may delay a run.
+    - cron: '17 9 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/competitive-radar.yml'
+      - 'tools/competitive_radar.py'
+      - 'tools/competitive_radar.json'
+      - 'tests/test_competitive_radar.py'
+
+permissions:
+  contents: read
+
+jobs:
+  offline-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate offline watchlist and issue-update logic
+        run: python3 -m unittest discover -s tests -p test_competitive_radar.py -v
+
+  weekly-report:
+    if: github.event_name != 'pull_request'
+    needs: offline-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: nx2-competitive-radar
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update only the metadata section of one GitHub issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 tools/competitive_radar.py --publish
