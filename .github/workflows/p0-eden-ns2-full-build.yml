@@ -1,0 +1,91 @@
+name: P0 Eden-NS2 full runtime source-build gate (Linux 26.04)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p0-eden-ns2-full-build.yml'
+      - 'docs/research/eden_ns2_full_build_gate_2026-10-30.md'
+
+permissions:
+  contents: read
+
+jobs:
+  eden-runtime:
+    name: Frozen original core, loader, HLE and GPU source build + upstream tests
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    steps:
+      - name: NX2 checkout (no retained credentials)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Linux source-build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            clang cmake ninja-build autoconf automake libtool pkg-config nasm \
+            g++ git python3 python3-pip ca-certificates \
+            libfmt-dev liblz4-dev nlohmann-json3-dev libzstd-dev \
+            libssl-dev zlib1g-dev libboost-dev libboost-fiber-dev libboost-context-dev \
+            libxbyak-dev catch2 libopus-dev libasound2-dev \
+            libavcodec-dev libavfilter-dev libswscale-dev \
+            libvulkan-dev vulkan-utility-libraries-dev \
+            spirv-tools spirv-headers glslang-tools libsdl3-dev \
+            libenet-dev libusb-1.0-0-dev libva-dev libvdpau-dev \
+            libxext-dev libxkbcommon-dev
+          cmake --version | head -1
+          clang++ --version | head -1
+      - name: Fetch exact original Eden-NS2 GPL source (no vendor executables)
+        shell: bash
+        env:
+          EDEN_SHA: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eden"
+          git -C "$RUNNER_TEMP/eden" init -q
+          git -C "$RUNNER_TEMP/eden" remote add origin https://github.com/0x2593/Eden-NS2.git
+          git -C "$RUNNER_TEMP/eden" -c protocol.version=2 fetch --quiet \
+            --no-tags --depth=1 --filter=blob:none origin "$EDEN_SHA"
+          git -C "$RUNNER_TEMP/eden" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/eden" rev-parse HEAD)" = "$EDEN_SHA"
+          test -f "$RUNNER_TEMP/eden/src/core/CMakeLists.txt"
+          test -f "$RUNNER_TEMP/eden/src/video_core/CMakeLists.txt"
+          test -f "$RUNNER_TEMP/eden/src/tests/CMakeLists.txt"
+          test -s "$RUNNER_TEMP/eden/LICENSE.txt"
+          test -z "$(git -C "$RUNNER_TEMP/eden" status --porcelain --untracked-files=no)"
+          echo "NX2_EDEN_FULL_SOURCE_PIN_PASS"
+          echo "upstream_sha=$EDEN_SHA"
+      - name: Configure actual upstream emulator libraries and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=OFF \
+            -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF \
+            -DENABLE_LIBUSB=OFF -DENABLE_CUBEB=OFF \
+            -DENABLE_OPENGL=OFF -DYUZU_ROOM=OFF \
+            -DYUZU_CMD=OFF -DYUZU_TESTS=ON -DBUILD_TESTING=ON \
+            -DENABLE_WERROR=OFF \
+            -DYUZU_USE_CPM=ON
+          test -f "$RUNNER_TEMP/eden-build/build.ninja"
+          echo 'NX2_EDEN_FULL_CONFIGURE_PASS'
+      - name: Compile real upstream CPU, loader, HLE, GPU and test targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$RUNNER_TEMP/eden-build" --target tests --parallel 2
+          test -x "$RUNNER_TEMP/eden-build/bin/tests"
+          echo 'NX2_EDEN_FULL_COMPILE_PASS'
+      - name: Execute upstream source-owned native tests (no games)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/eden-build/bin/tests" '[native-gpu],[graphics-supervisor]' \
+            --reporter compact \
+            | tee "$RUNNER_TEMP/eden-runtime-native-tests.txt"
+          echo 'NX2_EDEN_UPSTREAM_NATIVE_TESTS_PASS'
