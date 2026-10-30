@@ -182,7 +182,11 @@ jobs:
           if start_result.returncode or start_result.stderr.strip():
               raise SystemExit('original HBX _start guest execution refused')
           start_lines = start_result.stdout.splitlines()
-          if 'hbx_caller_stack_writes=1' not in start_lines or \
+          original_frame_effects = [
+              int(line.split('=', 1)[1]) for line in start_lines
+              if line.startswith('hbx_caller_stack_writes=')]
+          if len(original_frame_effects) != 1 or \
+             original_frame_effects[0] not in (1, 2) or \
              'hbx_full_write_ledger=two_runs_equal' not in start_lines:
               raise SystemExit('original HBX CRT0 stack effects not verified')
           if 'NX2_HBX_STAGE1_ORIGINAL_GUEST_PASS' not in start_lines:
