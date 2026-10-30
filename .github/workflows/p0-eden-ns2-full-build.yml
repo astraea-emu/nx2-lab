@@ -58,6 +58,36 @@ jobs:
           test -z "$(git -C "$RUNNER_TEMP/eden" status --porcelain --untracked-files=no)"
           echo "NX2_EDEN_FULL_SOURCE_PIN_PASS"
           echo "upstream_sha=$EDEN_SHA"
+      - name: Apply one measured build-only narrowing fix to isolated upstream tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Original frozen Clang build failed: signed s32 layer narrowed in u64{layer}.
+          # For-loop starts layer at 0, increments while below resources.layers:
+          # conversion to u64 is safe, with no guest API/behavior change intended.
+          export EDEN_SOURCE="$RUNNER_TEMP/eden"
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import subprocess
+          root = pathlib.Path(os.environ['EDEN_SOURCE'])
+          name = 'src/video_core/texture_cache/util.cpp'
+          path = root / name
+          expected = '94e841e8ea4e13beb547ecc1653b5088b770a166'
+          actual = subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip()
+          assert actual == expected, f'Frozen file provenance mismatch: {actual}'
+          old = 'const u64 segment_begin = u64{layer} * layer_stride + level_offset;'
+          new = 'const u64 segment_begin = static_cast<u64>(layer) * layer_stride + level_offset;'
+          source = path.read_text()
+          assert source.count(old) == 1, 'Expected exact one-line Clang narrowing defect'
+          assert 'for (s32 layer = 0; layer < info.resources.layers; ++layer)' in source
+          path.write_text(source.replace(old, new))
+          assert path.read_text().count(new) == 1
+          PY
+          git -C "$RUNNER_TEMP/eden" diff --check
+          git -C "$RUNNER_TEMP/eden" diff -- src/video_core/texture_cache/util.cpp
+          test "$(git -C "$RUNNER_TEMP/eden" diff --numstat | awk '{print $1, $2, $3}')" =             '1 1 src/video_core/texture_cache/util.cpp'
+          echo 'NX2_EDEN_ONE_LINE_BUILD_PATCH_VERIFIED'
       - name: Configure actual upstream emulator libraries and tests
         shell: bash
         run: |
