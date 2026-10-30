@@ -98,8 +98,11 @@ unmapped pointers, denied writable stack, invalid entry and instruction budget
 were rejected. Original code/data image SHA-256 values were checked.
 No native host service, Nintendo Horizon service or console was invoked.
 **This is not yet a full HBX app launch, Switch 2 Horizon implementation,
-or game.** Full original `_start` entry/return semantics and an independent
-QEMU stage-1 oracle comparison remain unproven.
+or game.** Full original `_start` entry/return semantics remain unproven.
+A new **draft** E3 external QEMU oracle compares exact original-object
+stage-1 return values with the NX2 guest adapter; this is not an
+accepted result until specialized final-head CI proves the comparison.
+No genuine console/Horizon ABI is claimed.
 
 ## First native-facing independent research target (host-only)
 
