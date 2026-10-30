@@ -161,7 +161,12 @@ jobs:
           echo 'NX2_EDEN_SOURCE_AUTHORED_GUEST_EXECUTION_PASS'
           # Secondary, stricter original-program progression measurements. Absence
           # of later results is reported, not misrepresented as a full guest exit.
-          for marker in             'Loader: X1='             'Contador (.data): 42'             'Suma en el heap: 499500'             'fibonacci(50) = 12586269025'             'Adios! (main devuelve -> svcExitProcess)'; do
+          for marker in \
+            'Loader: X1=' \
+            'Contador (.data): 42' \
+            'Suma en el heap: 499500' \
+            'fibonacci(50) = 12586269025' \
+            'Adios! (main devuelve -> svcExitProcess)'; do
             if grep -Fq "$marker" "$RUNNER_TEMP/good-guest.log"; then
               echo "NX2_EDEN_GUEST_MARKER_OBSERVED=$marker"
             else
