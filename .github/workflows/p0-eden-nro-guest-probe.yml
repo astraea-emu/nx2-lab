@@ -108,7 +108,7 @@ jobs:
             -DENABLE_OPENGL=OFF -DYUZU_CMD=ON -DYUZU_TESTS=OFF \
             -DBUILD_TESTING=OFF -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
           cmake --build "$RUNNER_TEMP/eden-build" --target yuzu-cmd --parallel 2
-          test -x "$RUNNER_TEMP/eden-build/bin/yuzu-cmd"
+          test -x "$RUNNER_TEMP/eden-build/bin/eden-cli"
           echo 'NX2_EDEN_CLI_INTEGRATED_COMPILE_PASS'
       - name: Run bounded valid and invalid NRO headless trials without console data
         shell: bash
@@ -132,7 +132,7 @@ jobs:
           bad[0x10:0x14]=b"NX2!"
           pathlib.Path(os.environ["RUNNER_TEMP"],"bad-magic.nro").write_bytes(bad)
           PY
-          binary="$RUNNER_TEMP/eden-build/bin/yuzu-cmd"
+          binary="$RUNNER_TEMP/eden-build/bin/eden-cli"
           set +e
           timeout --signal=TERM --kill-after=5s 22s "$binary" \
             --program nx2-source-probe --null-render --singlecore --game "$NRO" >"$RUNNER_TEMP/good-guest.log" 2>&1
