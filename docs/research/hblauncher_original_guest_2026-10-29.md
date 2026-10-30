@@ -117,6 +117,30 @@ context and return sentinel are NX2-owned research fixtures. The QEMU
 comparison covers stage-1 return codes, not every intermediate register or
 memory effect, and no physical Switch 2 observation has been made.
 
+## Guest write-effect accounting and image integrity (2026-10-30 draft)
+
+The next isolated E3 test records exact checked-memory write callback
+events (guest address, byte width and written bytes), caps the ledger
+at 4096 events and compares all events between two clean source-owned
+executions. It verifies immutable RX code, original data and read-only
+HBX context; source-defined writes must remain entirely within the
+mapped application stack or the independent caller stack. For the full
+upstream `_start` route, the only authorized caller-stack change is
+the original 16-byte saved frame with initial X29 and return-sentinel X30.
+The direct-C-function route must not modify the independent caller stack.
+
+The separately bounded host intake checker reads the *actual* generated
+`report.json`, `code.bin`, and `data.bin`, requires SHA-256/size/entry
+and mapped-region agreement, and refuses 19 isolated manifest/image
+mutations. This protects against accidental input alteration; report
+and image are generated together from the **already source-pinned
+upstream build** and do not establish independent code-signature trust.
+
+An observed write callback is not a complete architectural effect
+trace. The final-head CI must pass before treating this as confirmed
+research, and none of it proves Nintendo Horizon or physical Switch 2
+compatibility.
+
 ## Next dependency
 
 After an actual stage-1 positive result, qualify the original `_start`
