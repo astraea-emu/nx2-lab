@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Fetch public candidate at exact revision (no submodules)
+      - name: Fetch public candidate and pinned Vulkan build dependencies
         env:
           NEXO_SHA: 7fa73a5062e64370163a248d1a0b555272012c0f
           NRO_GIT_BLOB: bb0ee2a52acd303e7c800443163aa91900eabb58
@@ -34,6 +34,13 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/nexo2" hash-object tests/generated/hello.nro)" = "$NRO_GIT_BLOB"
           test -z "$(git -C "$RUNNER_TEMP/nexo2" status --porcelain --untracked-files=no)"
           test -s "$RUNNER_TEMP/nexo2/LICENSE"
+          # Frozen upstream's source cannot compile on GCC13 with Vulkan disabled:
+          # gpu.cpp owns unique_ptr<Vulkan::Device/Rasterizer> incomplete types.
+          # Fetch only the original revision's pinned Vulkan header and loader
+          # gitlinks. We still do not run GPU tests or any game data.
+          git -C "$RUNNER_TEMP/nexo2" submodule update --init             externals/Vulkan-Headers externals/volk
+          git -C "$RUNNER_TEMP/nexo2" submodule status --             externals/Vulkan-Headers externals/volk
+          test -z "$(git -C "$RUNNER_TEMP/nexo2" status --porcelain --untracked-files=no)"
           echo "NEXO_FROZEN_SOURCE_AND_NRO_VERIFIED"
           echo "candidate_revision=$NEXO_SHA"
           echo "nro_blob=$NRO_GIT_BLOB"
@@ -44,7 +51,7 @@ jobs:
           printf '\ntarget_sources(nexo2_tests PRIVATE "%s")\n' \
             "$GITHUB_WORKSPACE/tools/reference/nexo2/nro_qualification.cpp" \
             >> "$RUNNER_TEMP/nexo2/CMakeLists.txt"
-      - name: Configure CPU, loader and HLE only
+      - name: Configure CPU/loader/HLE plus compiled Vulkan deps (no GPU execution)
         shell: bash
         run: |
           set -euo pipefail
@@ -52,10 +59,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DNEXO2_BUILD_APP=OFF -DNEXO2_BUILD_QT=OFF \
             -DNEXO2_BUILD_TESTS=ON -DNEXO2_ENABLE_JIT=OFF \
-            -DNEXO2_ENABLE_VULKAN=OFF -DNEXO2_ENABLE_TLS=OFF
+            -DNEXO2_ENABLE_VULKAN=ON -DNEXO2_ENABLE_TLS=OFF
           grep -Fxq 'NEXO2_BUILD_APP:BOOL=OFF' "$RUNNER_TEMP/nexo-build/CMakeCache.txt"
           grep -Fxq 'NEXO2_ENABLE_JIT:BOOL=OFF' "$RUNNER_TEMP/nexo-build/CMakeCache.txt"
-          grep -Fxq 'NEXO2_ENABLE_VULKAN:BOOL=OFF' "$RUNNER_TEMP/nexo-build/CMakeCache.txt"
+          grep -Fxq 'NEXO2_ENABLE_VULKAN:BOOL=ON' "$RUNNER_TEMP/nexo-build/CMakeCache.txt"
           grep -Fxq 'NEXO2_ENABLE_TLS:BOOL=OFF' "$RUNNER_TEMP/nexo-build/CMakeCache.txt"
       - name: Compile actual candidate core and independent checks
         shell: bash
