@@ -92,7 +92,12 @@ Dynarmic guest runner can be entered at the original `report.json.entry`
 instead of `hbxAppMain`. This triggers original `crt0.S`: BTI landing,
 caller frame save, context-provided stack selection, BL to `hbx_app_main`,
 and caller frame/LR/SP restoration before an NX2-specified non-executable
-return sentinel. The adapter requires exact original guest return codes
+return sentinel. The first draft test **correctly failed** with a typed
+`guest_pc_outside_checked_rx` stop because the research fixture incorrectly
+used an identical incoming caller SP and `ctx->stack_base`: the app overwrote
+the saved caller frame after the intended switch. The corrected test maps
+distinct caller and application stacks with separate permissions. This
+test-harness finding is not evidence of a Nintendo vulnerability. The adapter requires exact original guest return codes
 for valid and three invalid contexts, restored SP/x29/x30, safe negative
 permissions and a strictly larger instruction count than direct function
 entry. The independent QEMU oracle still validates the original C function
