@@ -1,0 +1,241 @@
+name: P0 Eden-NS2 original NRO guest-execution probe (Linux)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p0-eden-nro-guest-probe.yml'
+      - 'tools/reference/eden_ns2/assess_eden_guest.py'
+      - 'tools/reference/eden_ns2/test_assess_eden_guest.py'
+      - 'tools/reference/eden_ns2/add_nro_exit_thunk.py'
+      - 'tools/reference/eden_ns2/test_add_nro_exit_thunk.py'
+      - 'tools/reference/eden_ns2/nro_preflight.py'
+      - 'tools/reference/eden_ns2/test_nro_preflight.py'
+
+concurrency:
+  group: eden-nro-guest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  bounded-guest:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 50
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
+    steps:
+      - name: Checkout NX2 without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify binary-safe guest-log assessor before expensive build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 \
+            -p test_assess_eden_guest.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_add_nro_exit_thunk.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_nro_preflight.py
+          echo 'NX2_EDEN_GUEST_LOG_ASSESSOR_UNIT_PASS'
+      - name: Install supported Linux compiler and CLI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            ccache clang cmake ninja-build autoconf automake libtool pkg-config nasm \
+            g++ git python3 ca-certificates \
+            libfmt-dev liblz4-dev nlohmann-json3-dev libzstd-dev \
+            libssl-dev zlib1g-dev libboost-dev libboost-fiber-dev libboost-context-dev \
+            libxbyak-dev libopus-dev libasound2-dev \
+            libavcodec-dev libavfilter-dev libswscale-dev \
+            libvulkan-dev vulkan-utility-libraries-dev \
+            spirv-tools spirv-headers glslang-tools libsdl3-dev \
+            libenet-dev libusb-1.0-0-dev libva-dev libvdpau-dev \
+            libxext-dev libxkbcommon-dev
+      - name: Restore bounded frozen-source compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/eden-cxx-cache
+          key: eden-cli-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
+          restore-keys: |
+            eden-cli-ubuntu26-clang-e2f285ab-v1-
+      - name: Initialize bounded ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=1200M
+          ccache --zero-stats
+      - name: Fetch pinned Eden emulator code, not release binaries or console data
+        env:
+          EDEN_SHA: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/eden"
+          git -C "$RUNNER_TEMP/eden" remote add origin https://github.com/0x2593/Eden-NS2.git
+          git -C "$RUNNER_TEMP/eden" -c protocol.version=2 fetch --quiet \
+            --no-tags --depth=1 --filter=blob:none origin "$EDEN_SHA"
+          git -C "$RUNNER_TEMP/eden" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/eden" rev-parse HEAD)" = "$EDEN_SHA"
+          test -f "$RUNNER_TEMP/eden/src/yuzu_cmd/yuzu.cpp"
+          test -s "$RUNNER_TEMP/eden/LICENSE.txt"
+          echo 'NX2_EDEN_ORIGINAL_SOURCE_PIN_PASS'
+      - name: Apply only the previously measured Clang source-build correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EDEN_SOURCE="$RUNNER_TEMP/eden"
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import subprocess
+          root = pathlib.Path(os.environ["EDEN_SOURCE"])
+          name = "src/video_core/texture_cache/util.cpp"
+          original = "94e841e8ea4e13beb547ecc1653b5088b770a166"
+          actual = subprocess.check_output(
+              ["git", "-C", str(root), "hash-object", name], text=True).strip()
+          assert actual == original, f"Unexpected source blob: {actual}"
+          file = root / name
+          old = "const u64 segment_begin = u64{layer} * layer_stride + level_offset;"
+          new = "const u64 segment_begin = static_cast<u64>(layer) * layer_stride + level_offset;"
+          source = file.read_text()
+          assert source.count(old) == 1
+          assert "for (s32 layer = 0; layer < info.resources.layers; ++layer)" in source
+          file.write_text(source.replace(old, new))
+          PY
+          git -C "$RUNNER_TEMP/eden" diff --check
+          test "$(git -C "$RUNNER_TEMP/eden" diff --numstat)" = \
+            "$(printf '1\t1\tsrc/video_core/texture_cache/util.cpp')"
+          echo 'NX2_EDEN_ONE_LINE_BUILD_FIX_ONLY'
+      - name: Obtain independently source-authored Switch 1 homebrew input at exact revision
+        env:
+          NEXO_SHA: 7fa73a5062e64370163a248d1a0b555272012c0f
+          NRO_BLOB: bb0ee2a52acd303e7c800443163aa91900eabb58
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/nexo"
+          git -C "$RUNNER_TEMP/nexo" remote add origin https://github.com/NeXoNetwork/NeXo2-emu.git
+          git -C "$RUNNER_TEMP/nexo" sparse-checkout set --no-cone \
+            tests/generated/hello.nro tests/programs/nro_hello/main.c
+          git -C "$RUNNER_TEMP/nexo" -c protocol.version=2 fetch --quiet \
+            --no-tags --depth=1 --filter=blob:none origin "$NEXO_SHA"
+          git -C "$RUNNER_TEMP/nexo" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/nexo" rev-parse HEAD)" = "$NEXO_SHA"
+          test "$(git -C "$RUNNER_TEMP/nexo" hash-object tests/generated/hello.nro)" = "$NRO_BLOB"
+          test "$(stat -c '%s' "$RUNNER_TEMP/nexo/tests/generated/hello.nro")" = 24636
+          test -f "$RUNNER_TEMP/nexo/tests/programs/nro_hello/main.c"
+          echo 'NX2_SOURCE_AUTHORED_NRO_VERIFIED'
+      - name: Compile original Eden command-line emulator and CPU/HLE/GPU libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_UPDATE_CHECKER=OFF \
+            -DENABLE_CUBEB=OFF -DENABLE_LIBUSB=OFF -DYUZU_ROOM=OFF \
+            -DENABLE_OPENGL=OFF -DYUZU_CMD=ON -DYUZU_TESTS=OFF \
+            -DBUILD_TESTING=OFF -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
+          cmake --build "$RUNNER_TEMP/eden-build" --target yuzu-cmd --parallel 2
+          test -x "$RUNNER_TEMP/eden-build/bin/eden-cli"
+          ccache --show-stats
+          echo 'NX2_EDEN_CLI_INTEGRATED_COMPILE_PASS'
+      - name: Trial original, adapted and invalid homebrew in independent sandboxes
+        shell: bash
+        run: |
+          set -euo pipefail
+          original="$RUNNER_TEMP/nexo/tests/generated/hello.nro"
+          python3 tools/reference/eden_ns2/nro_preflight.py "$original"
+          python3 tools/reference/eden_ns2/add_nro_exit_thunk.py \
+            --original "$original" --output "$RUNNER_TEMP/exit-thunk.nro"
+          python3 tools/reference/eden_ns2/nro_preflight.py "$RUNNER_TEMP/exit-thunk.nro"
+          export NRO="$original"
+          python3 - <<'PY'
+          import os, pathlib
+          source = pathlib.Path(os.environ['NRO']).read_bytes()
+          bad = bytearray(source)
+          bad[0x10:0x14] = b'NX2!'
+          pathlib.Path(os.environ['RUNNER_TEMP'], 'bad-magic.nro').write_bytes(bad)
+          PY
+          binary="$RUNNER_TEMP/eden-build/bin/eden-cli"
+          run_eden() {
+            local sandbox="$1" seconds="$2" log="$3"
+            shift 3
+            local home="$RUNNER_TEMP/sandbox-$sandbox"
+            mkdir -p "$home/config" "$home/data" "$home/cache"
+            env HOME="$home" XDG_CONFIG_HOME="$home/config" \
+              XDG_DATA_HOME="$home/data" XDG_CACHE_HOME="$home/cache" \
+              SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
+              LIBGL_ALWAYS_SOFTWARE=1 EDEN_DUMP_THREADS_AT=3 \
+              timeout --signal=TERM --kill-after=5s "$seconds" \
+              "$binary" "$@" >"$log" 2>&1
+          }
+          set +e
+          # Invalid FIRST, separate XDG home: distinguish loader rejection from
+          # a stale state after the deliberately timed-out positive run.
+          run_eden invalid 12s "$RUNNER_TEMP/bad-guest.log" \
+            --null-render --singlecore --game "$RUNNER_TEMP/bad-magic.nro"
+          bad_rc=$?
+          run_eden original 12s "$RUNNER_TEMP/good-guest.log" \
+            --program nx2-source-probe --null-render --singlecore --game "$original"
+          good_rc=$?
+          run_eden adapted 12s "$RUNNER_TEMP/adapted-guest.log" \
+            --program nx2-source-probe --null-render --singlecore --game "$RUNNER_TEMP/exit-thunk.nro"
+          adapted_rc=$?
+          set -e
+          echo "NX2_ADAPTED_NRO_PROCESS_EXIT=$adapted_rc"
+          export ADAPTED_LOG="$RUNNER_TEMP/adapted-guest.log"
+          set +e
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          raw = Path(os.environ['ADAPTED_LOG']).read_bytes()
+          checks = {
+              'guest_debug_svc': b'Hola desde un NRO en NeXo 2!',
+              'guest_counter': b'Contador (.data): 42',
+              'guest_heap_sum': b'Suma en el heap: 499500',
+              'guest_fibonacci': b'fibonacci(50) = 12586269025',
+              'guest_final_output': b'Adios! (main devuelve -> svcExitProcess)',
+          }
+          for key, marker in checks.items():
+              print(f"NX2_ADAPTED_{key.upper()}={int(marker in raw)}")
+          fault = b'Cannot execute instruction at unmapped address' in raw
+          print(f"NX2_ADAPTED_UNMAPPED_PC_FAULT={int(fault)}")
+          print(f"NX2_ADAPTED_LOG_BYTES={len(raw)}")
+          for i, line in enumerate(raw.decode('utf-8','replace').replace('\0','[NUL]').splitlines()):
+              if any(x in line for x in ('OutputDebugString','ExitProcess','ExceptionRaised',
+                                         'Shutdown','Error','Critical')):
+                  print(f"NX2_ADAPTED_LOG[{i}]={line[:300]}")
+          if not all(marker in raw for marker in checks.values()) or fault:
+              raise SystemExit('NX2_ADAPTED_EXIT_PATH_NOT_VERIFIED')
+          print('NX2_ADAPTED_FINAL_GUEST_MESSAGE_NO_UNMAPPED_FAULT')
+          PY
+          adapted_check=$?
+          python3 tools/reference/eden_ns2/assess_eden_guest.py \
+            --good-log "$RUNNER_TEMP/good-guest.log" \
+            --bad-log "$RUNNER_TEMP/bad-guest.log" \
+            --good-exit "$good_rc" --bad-exit "$bad_rc"
+          original_controls=$?
+          set -e
+          echo "NX2_ADAPTED_CHECK_RC=$adapted_check"
+          echo "NX2_ORIGINAL_CONTROLS_RC=$original_controls"
+          test "$adapted_check" -eq 0
+          test "$original_controls" -eq 0
+          echo 'NX2_EDEN_ORIGINAL_AND_ADAPTED_NRO_ACCEPTED'
+      - name: Preserve bounded guest trial logs for independent review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-nro-guest-logs
+          retention-days: 3
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/good-guest.log
+            ${{ runner.temp }}/bad-guest.log
+            ${{ runner.temp }}/adapted-guest.log
