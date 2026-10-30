@@ -1,4 +1,22 @@
-# NX2 Lab — Live Status (2026-10-29)
+# NX2 Lab — Live Status (2026-10-30)
+
+## Competitive readiness and next acceptance gate
+
+NX2 is an **ARM64/homebrew research harness**, **not** a playable Switch 2
+emulator. The source-pinned HBLauncher custom SDK stage-1 route executed
+the original `_start` and recorded 795 ARM64 instruction steps with
+actual guest stack/write effects and QEMU return parity. This is
+**not Nintendo Horizon**, native NSO/NRO support, an NVN2/SM86 GPU
+implementation or a guest-rendered frame.
+
+The [October 30 architecture audit](COMPETITIVE_ARCHITECTURE_AUDIT_2026-10-30.md)
+identifies mature Eden-derived codebases with new Switch 2-facing
+patches. The **next strategic gate is to qualify a mature executable
+runtime or an upstream contribution path**, rather than keep widening
+the stand-alone HBX fixture. Current stage-2 [issue #20](https://github.com/astraea-emu/nx2-lab/issues/20)
+remains a bounded regression task only. Actual copyright, host
+containment and dependency-license reviews are prerequisites to adopting
+a third-party runtime; no foreign source has been merged.
 
 ## Implemented and tested
 
