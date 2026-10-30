@@ -1,0 +1,41 @@
+name: P0 source-authored native ExeFS / extended-NPDM fixture
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p0-native-exefs-fixture.yml'
+      - 'tools/reference/eden_ns2/make_native_exefs.py'
+      - 'tools/reference/eden_ns2/test_make_native_exefs.py'
+      - 'docs/research/eden_native_exefs_fixture_2026-10-30.md'
+
+permissions:
+  contents: read
+
+jobs:
+  original-exefs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run independent source-owned NSO and NPDM tests
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 \
+            -p test_make_native_exefs.py
+          echo 'NX2_ORIGINAL_NATIVE_EXEFS_UNIT_PASS'
+      - name: Generate twice and verify byte-level reproducibility
+        run: |
+          set -euo pipefail
+          python3 tools/reference/eden_ns2/make_native_exefs.py \
+            --output "$RUNNER_TEMP/a"
+          python3 tools/reference/eden_ns2/make_native_exefs.py \
+            --output "$RUNNER_TEMP/b"
+          cmp "$RUNNER_TEMP/a/main" "$RUNNER_TEMP/b/main"
+          cmp "$RUNNER_TEMP/a/main.npdm" "$RUNNER_TEMP/b/main.npdm"
+          file "$RUNNER_TEMP/a/main"
+          test "$(stat -c '%s' "$RUNNER_TEMP/a/main")" = 12544
+          test "$(stat -c '%s' "$RUNNER_TEMP/a/main.npdm")" = 1536
+          echo 'NX2_ORIGINAL_NATIVE_EXEFS_DETERMINISTIC_PASS'
