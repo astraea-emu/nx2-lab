@@ -85,6 +85,25 @@ exact CPU and guest memory trace parity beyond returned statuses, and
 physical Switch 2 behavior. This is a narrow but independent E3 semantic
 oracle, not a device verification substitute.
 
+## Original _start execution experiment (2026-10-30; PR under review)
+
+The same original pinned HBLauncher code/data, context, guest stack and
+Dynarmic guest runner can be entered at the original `report.json.entry`
+instead of `hbxAppMain`. This triggers original `crt0.S`: BTI landing,
+caller frame save, context-provided stack selection, BL to `hbx_app_main`,
+and caller frame/LR/SP restoration before an NX2-specified non-executable
+return sentinel. The adapter requires exact original guest return codes
+for valid and three invalid contexts, restored SP/x29/x30, safe negative
+permissions and a strictly larger instruction count than direct function
+entry. The independent QEMU oracle still validates the original C function
+return statuses, while upstream's separate QEMU ABI suite tests its
+trampoline. The test does **not** establish full machine-state trace parity
+between NX2 and QEMU.
+
+This is **not** Nintendo process entry or Horizon ABI; the reference host
+context and return sentinel are NX2-owned research fixtures. No result from
+this experiment is accepted until specialized CI passes on its final PR head.
+
 ## Next dependency
 
 After an actual stage-1 positive result, qualify the original `_start`
