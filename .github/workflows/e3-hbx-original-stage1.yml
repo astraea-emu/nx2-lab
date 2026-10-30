@@ -156,4 +156,34 @@ jobs:
           print('original_external_object_reused=yes')
           print('qemu_console_or_horizon_evidence=none')
           print('NX2_HBX_STAGE1_CI_ACCEPTED')
+          # Execute the *original* HBX _start trampoline using the same
+          # untouched code/data. NX2 independently checks caller SP/FP/LR.
+          start_args = list(args)
+          start_args[5] = spec['entry']
+          start_result = subprocess.run(start_args, capture_output=True,
+                                        text=True, timeout=20)
+          print(start_result.stdout, end='')
+          print(start_result.stderr, end='')
+          if start_result.returncode or start_result.stderr.strip():
+              raise SystemExit('original HBX _start guest execution refused')
+          start_lines = start_result.stdout.splitlines()
+          if 'NX2_HBX_STAGE1_ORIGINAL_GUEST_PASS' not in start_lines:
+              raise SystemExit('original HBX _start missing accepted return')
+          if values(start_lines) != values(oracle):
+              raise SystemExit('original HBX _start/QEMU return parity failed')
+          start_counts = [
+              int(line.split('=', 1)[1]) for line in start_lines
+              if line.startswith('hbx_original_instructions_retired=')]
+          direct_counts = [
+              int(line.split('=', 1)[1]) for line in lines
+              if line.startswith('hbx_original_instructions_retired=')]
+          if len(start_counts) != 1 or len(direct_counts) != 1:
+              raise SystemExit('original HBX _start instruction count missing')
+          if not direct_counts[0] < start_counts[0] <= 4096:
+              raise SystemExit('original HBX _start did not traverse CRT0')
+          print('NX2_HBX_ORIGINAL_CRT0_ENTRY_PASS')
+          print('hbx_crt0_original_instructions_retired='+str(start_counts[0]))
+          print('hbx_crt0_return_sp_fp_lr=restored')
+          print('original_hbx_qemu_stage1_return_parity=checked')
+
           PY
