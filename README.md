@@ -2,22 +2,20 @@
 
 **Independent, clean-room Nintendo Switch 2 security research and emulation foundations.**
 
-> **Status (2026-10-29): not a Switch 2 emulator, jailbreak, custom firmware,
-> firmware loader, or commercial game runner.** Generic, bounded AArch64
-> test fixtures and a pinned, externally authored **Linux** AArch64 ELF have
-> run under research-only test workflows with strictly mock service handling.
-> There are **zero measured Switch 2 ABI or game execution results**.
+> **Status (2026-10-30): not a Switch 2 emulator, jailbreak or game runner.**
+> The pinned original HBLauncher **custom HBX ABI** stage-1 `_start` executed
+> 795 AArch64 instructions under a research Dynarmic adapter, with verified
+> guest memory effects and QEMU return parity. This is **not** Nintendo
+> Horizon, Switch 2-specific native execution or a guest-produced game frame.
 
-## Current direction
+## Current direction — one evidence-driven gate
 
-Read [the evidence-first strategic roadmap](docs/STRATEGY_2026-10-29.md).
-The primary next deliverable is a reusable, externally reproducible
-**Switch 2 compatibility/conformance corpus**. An independent emulator
-runtime and authorized vulnerability research are distinct tracks.
-The small CPU interpreter is a correctness oracle; adding generic ARM64
-opcodes is not a substitute for verified Horizon, graphics or device ABI
-behavior. New findings must separate source claims, host-only reproduction,
-and authorized device observations.
+The primary milestone is [#21: qualify a mature emulator runtime or upstream-first path](https://github.com/astraea-emu/nx2-lab/issues/21), with a reproducible, lawful source-owned workload. HBLauncher stage 2 ([#20](https://github.com/astraea-emu/nx2-lab/issues/20)) remains a bounded research regression, not the primary product milestone.
+
+**Do not replan merely because a new competitor repo or screenshot appears.**
+Follow [Adaptive Strategy: decision rules, evidence thresholds and review cadence](docs/ADAPTIVE_STRATEGY.md). The [weekly metadata-only competitive radar](.github/workflows/competitive-radar.yml) tracks selected public repositories and updates one issue; it never decides architecture or automatically changes the codebase.
+
+See the [October 30 competitive architecture audit](docs/COMPETITIVE_ARCHITECTURE_AUDIT_2026-10-30.md) and [live status](docs/STATUS.md). The tiny interpreter is a correctness oracle; it must not grow into a new whole-console implementation without an independently measured reason.
 
 ## Why a separate project?
 
