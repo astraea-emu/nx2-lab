@@ -117,39 +117,36 @@ context and return sentinel are NX2-owned research fixtures. The QEMU
 comparison covers stage-1 return codes, not every intermediate register or
 memory effect, and no physical Switch 2 observation has been made.
 
-## Guest write-effect accounting and image integrity (2026-10-30 draft)
+## Guest write-effect accounting and binary intake (2026-10-30)
 
-The next isolated E3 test records exact checked-memory write callback
-events (guest address, byte width and written bytes), caps the ledger
-at 4096 events and compares all events between two clean source-owned
-executions. It verifies immutable RX code, original data and read-only
-HBX context; source-defined writes must remain entirely within the
-mapped application stack or the independent caller stack. For the full
-upstream `_start` route, the only authorized caller-stack change is
-the original 16-byte saved frame with initial X29 and return-sentinel X30.
-The first experimental run rejected an overly rigid *one callback* expectation:
-the CPU backend may split a 16-byte AArch64 STP into two 8-byte memory
-callbacks. The corrected gate allows **one or two** callbacks only when
-every written byte and address exactly matches the original saved frame;
-other caller-stack writes, extra bytes and missing frame contents fail.
-The direct-C-function route must not modify the independent caller stack.
+The actual original `hbx_app_main` stage-1 run executes 777 ARM64
+instructions and produces **252 successful, captured stack-write
+callbacks**. Entering the unchanged upstream `_start` retires 795
+instructions and produces **254** writes: the same 252 app-stack writes
+and two additional 8-byte caller-stack writes.
 
-The separately bounded host intake checker reads the *actual* generated
-`report.json`, `code.bin`, and `data.bin`, requires SHA-256/size/entry
-and mapped-region agreement, and refuses 19 isolated manifest/image
-mutations. This protects against accidental input alteration; report
-and image are generated together from the **already source-pinned
-upstream build** and do not establish independent code-signature trust.
+The initial one-callback expectation failed closed. Dynarmic split
+the upstream source-defined STP save into **two** 8-byte callbacks.
+The corrected gate checks the exact 16 saved X29/X30 bytes and
+guest addresses, permits only 1x16 or 2x8 callback granularity and
+rejects any other caller-stack write. All successful write addresses,
+widths and bytes are compared across two independent executions.
+Executable code, original data/BSS and source-defined read-only HBX
+context remain byte-identical after execution.
 
-An observed write callback is not a complete architectural effect
-trace. The final-head CI must pass before treating this as confirmed
-research, and none of it proves Nintendo Horizon or physical Switch 2
-compatibility.
+A separate exact-source-generated image intake check verifies
+`report.json`, `code.bin` and `data.bin` SHA-256, entry and
+mapping extents; **19** malformed or changed synthetic cases are
+rejected. These checks protect against accidental mutation, not
+against an attacker who controls both upstream compiler and report.
+Neither guest write events nor QEMU return parity constitute a
+complete guest CPU architectural trace or console observation.
 
 ## Next dependency
 
-After an actual stage-1 positive result, qualify the original `_start`
-trampoline and its caller SP/return contract against upstream QEMU tests, then
-stage-2 input and later UI output only as original program behavior and
-independent evidence demand. Keep the small project-owned CPU interpreter as an
-oracle; do not expand its ISA merely to keep this demonstration working.
+Advance the same unchanged HBX Hello CPU executable to
+[stage 2: zero-input callback execution](https://github.com/astraea-emu/nx2-lab/issues/20)
+with `ctx.args[1]=2` and deliberately null custom input callback pointers.
+Verify original execution under NX2 and QEMU, no host-service dispatch,
+memory effects and repeatability. This is **not** actual Nintendo HID or
+physical controller support.
