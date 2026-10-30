@@ -5,6 +5,13 @@ on:
     # Weekly Monday at an off-peak UTC minute; GitHub may delay a run.
     - cron: '17 9 * * 1'
   workflow_dispatch:
+  # Bootstrap the first report when this workflow reaches main.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/competitive-radar.yml'
+      - 'tools/competitive_radar.py'
+      - 'tools/competitive_radar.json'
   pull_request:
     paths:
       - '.github/workflows/competitive-radar.yml'
