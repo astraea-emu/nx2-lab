@@ -19,10 +19,16 @@ EXIT = (
     b"ExitProcess: Process 81 exiting\n"
 )
 GOOD = CLASSIFICATION + OUTPUT + EXIT
-BAD = (
-    b"Core <Critical> core/core.cpp:339:Load: Failed to load ROM (Error 9)!\n"
-    b"Error Description: The NPDM file has a bad header.\n"
+CORE_REJECTION = (
+    b"Core <Critical> core/core.cpp:339:Load: Failed to load ROM (Error 4)!\n"
 )
+FRONTEND_REJECTION = (
+    b"Frontend <Critical> yuzu_cmd/yuzu.cpp:402:SDL_AppInit: "
+    b"While attempting to load the ROM requested, an error occurred. Please "
+    b"refer to the Eden wiki for more information or the Eden discord for "
+    b"additional help.\n\nError Code: 0007-0004\nError Description: 4\n"
+)
+BAD = CORE_REJECTION + FRONTEND_REJECTION
 PRIORITY_ASSERT = (
     b"Debug <Critical> core/hle/kernel/k_thread.cpp:140:operator(): "
     b"/tmp/eden/src/core/hle/kernel/k_thread.cpp: assert "
@@ -66,6 +72,29 @@ class NativeExeFsAssessmentTests(unittest.TestCase):
         self.assertFalse(self.run_case(g=GOOD.replace(
             b"core/hle/kernel/svc/svc_debug_string.cpp:25:", b"Fixture print: "))[0])
 
+    def test_host_prefixed_full_source_records_cannot_satisfy_positive_events(self):
+        for event in (CLASSIFICATION, OUTPUT, EXIT):
+            for prefix in (b"host echo: ", b"host echo: [   0.712979] "):
+                with self.subTest(event=event, prefix=prefix):
+                    self.assertFalse(self.run_case(g=GOOD.replace(event, prefix + event))[0])
+
+    def test_positive_interior_nul_cannot_hide_a_host_prefix_or_join_tokens(self):
+        for event in (CLASSIFICATION, OUTPUT, EXIT):
+            for corrupted in (b"host echo:\0" + event,
+                              event.replace(b": ", b": \0", 1)):
+                with self.subTest(event=event, corrupted=corrupted):
+                    self.assertFalse(self.run_case(g=GOOD.replace(event, corrupted))[0])
+
+    def test_each_positive_source_event_must_be_unique(self):
+        for event in (CLASSIFICATION, OUTPUT, EXIT):
+            with self.subTest(event=event):
+                self.assertFalse(self.run_case(g=GOOD + event)[0])
+
+    def test_positive_timestamps_ansi_and_boundary_nul_are_accepted(self):
+        good = b"".join(b"\0\x1b[0;37m[   0.712979] " + event + b"\x1b[0m"
+                        for event in (CLASSIFICATION, OUTPUT, EXIT))
+        self.assertTrue(self.run_case(g=good)[0])
+
     def test_missing_or_host_echoed_classification_fails(self):
         self.assertFalse(self.run_case(g=OUTPUT + EXIT)[0])
         self.assertFalse(self.run_case(g=GOOD.replace(b"core/core.cpp:321:Load: ", b""))[0])
@@ -87,10 +116,65 @@ class NativeExeFsAssessmentTests(unittest.TestCase):
 
     def test_negative_needs_specific_npdm_failure_not_unrelated_error(self):
         for log in (b"", b"Segmentation fault", b"Failed to initialize VideoCore!",
-                    b"Error Description: unrelated failure", BAD.replace(b"NPDM", b"NRO"),
+                    b"Error Description: unrelated failure",
                     BAD.replace(b"core/core.cpp:339:Load: ", b"")):
             with self.subTest(log=log):
                 self.assertFalse(self.run_case(b=log)[0])
+
+    def test_observed_numeric_npdm_diagnostic_is_accepted(self):
+        ok, report = self.run_case()
+        self.assertTrue(ok)
+        self.assertIn("NX2_NATIVE_INVALID_EXPLICIT_DIAGNOSTIC=1", report)
+
+    def test_exact_english_npdm_description_is_accepted_with_typed_tuple(self):
+        bad = BAD.replace(b"Error Description: 4",
+                          b"Error Description: The NPDM file has a bad header.")
+        self.assertTrue(self.run_case(b=bad)[0])
+
+    def test_negative_error_ids_and_description_must_agree(self):
+        for old, new in ((b"(Error 4)", b"(Error 9)"),
+                         (b"0007-0004", b"0007-0005"),
+                         (b"0007-0004", b"0006-0004"),
+                         (b"Description: 4", b"Description: 5"),
+                         (b"Description: 4", b"Description: 40"),
+                         (b"Description: 4", b"Description: The NPDM has a bad ACID header.")):
+            with self.subTest(old=old, new=new):
+                self.assertFalse(self.run_case(b=BAD.replace(old, new))[0])
+
+    def test_negative_diagnostic_needs_both_sources_and_complete_block(self):
+        for bad in (CORE_REJECTION, FRONTEND_REJECTION,
+                    CORE_REJECTION + b"Error Code: 0007-0004\nError Description: 4\n",
+                    CORE_REJECTION + b"Error Description: The NPDM file has a bad header.\n",
+                    BAD.replace(b"\nError Code: 0007-0004", b""),
+                    BAD.replace(b"\nError Description: 4", b""),
+                    BAD.replace(b"additional help.\n\n", b"additional help.\n"),
+                    BAD.replace(b"Error Description: 4", b"unrelated record\nError Description: 4")):
+            with self.subTest(bad=bad):
+                self.assertFalse(self.run_case(b=bad)[0])
+
+    def test_negative_host_echoes_do_not_qualify_as_source_records(self):
+        for bad in (b"host echo: " + BAD,
+                    BAD.replace(b"Frontend <Critical>", b"host echo: Frontend <Critical>"),
+                    BAD.replace(b"yuzu_cmd/yuzu.cpp:402:SDL_AppInit: ", b""),
+                    BAD.replace(b"Error Code: 0007-0004", b"host echo: Error Code: 0007-0004"),
+                    BAD.replace(b"Error Description: 4", b"host echo: Error Description: 4")):
+            with self.subTest(bad=bad):
+                self.assertFalse(self.run_case(b=bad)[0])
+
+    def test_negative_rejection_records_must_be_unique_and_ordered(self):
+        for bad in (FRONTEND_REJECTION + CORE_REJECTION,
+                    CORE_REJECTION + BAD, BAD + FRONTEND_REJECTION):
+            with self.subTest(bad=bad):
+                self.assertFalse(self.run_case(b=bad)[0])
+
+    def test_negative_actual_logger_timestamp_ansi_and_boundary_nul_are_accepted(self):
+        bad = (b"\x1b[0;31m[   0.156897] " + CORE_REJECTION + b"\x1b[0m\0"
+               b"\x1b[0;31m[   0.182388] " + FRONTEND_REJECTION + b"\x1b[0m\0")
+        self.assertTrue(self.run_case(b=bad)[0])
+
+    def test_negative_interior_nul_cannot_join_diagnostic_tokens(self):
+        self.assertFalse(self.run_case(b=BAD.replace(b"0007-0004", b"0007-\0\n0004"))[0])
+        self.assertFalse(self.run_case(b=BAD.replace(b"Error 4", b"Error \0" + b"4"))[0])
 
     def test_negative_diagnostic_followed_by_crash_or_assertion_fails(self):
         self.assertFalse(self.run_case(b=BAD + b"Segmentation fault", brc=139)[0])

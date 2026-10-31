@@ -64,7 +64,8 @@ jobs:
           aarch64-linux-gnu-as --version
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_make_native_ipc_exefs.py
       - name: Restore bounded frozen-source compiler cache
-        uses: actions/cache@v4
+        id: eden-cache
+        uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/eden-cxx-cache
           key: eden-cli-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
@@ -90,6 +91,9 @@ jobs:
           git -C "$RUNNER_TEMP/eden" checkout -q --detach FETCH_HEAD
           test "$(git -C "$RUNNER_TEMP/eden" rev-parse HEAD)" = "$EDEN_SHA"
           test -s "$RUNNER_TEMP/eden/LICENSE.txt"
+          # The negative-control checker binds error 4 to this exact loader enum.
+          test "$(git -C "$RUNNER_TEMP/eden" hash-object src/core/loader/loader.h)" = \
+            d3c0230cb0637bbd227ba30b703960f0b50ecbb6
           echo NX2_NATIVE_EXEFS_FROZEN_SOURCE_PASS
       - name: Apply previously verified isolated C++ cast fix
         shell: bash
@@ -158,10 +162,24 @@ jobs:
             -DENABLE_CUBEB=OFF -DENABLE_LIBUSB=OFF -DYUZU_ROOM=OFF \
             -DENABLE_OPENGL=OFF -DYUZU_CMD=ON -DYUZU_TESTS=OFF \
             -DBUILD_TESTING=OFF -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
-          cmake --build "$RUNNER_TEMP/eden-build" --target yuzu-cmd --parallel 2
+          cpu_count=$(nproc)
+          build_jobs=$(( cpu_count < 2 ? cpu_count : 2 ))
+          memory_kib=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+          available_memory_kib=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
+          if (( cpu_count >= 4 && memory_kib >= 14 * 1024 * 1024 && available_memory_kib >= 12 * 1024 * 1024 )); then
+            build_jobs=4
+          fi
+          echo "NX2_EDEN_BUILD_RESOURCES cpu=$cpu_count memory_kib=$memory_kib available_kib=$available_memory_kib jobs=$build_jobs"
+          cmake --build "$RUNNER_TEMP/eden-build" --target yuzu-cmd --parallel "$build_jobs"
           test -x "$RUNNER_TEMP/eden-build/bin/eden-cli"
           ccache --show-stats
           echo NX2_NATIVE_EXEFS_REAL_EDEN_CLI_BUILT
+      - name: Save compiler objects before runtime acceptance
+        if: always() && steps.eden-cache.outputs.cache-primary-key != '' && steps.eden-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/eden-cxx-cache
+          key: ${{ steps.eden-cache.outputs.cache-primary-key }}
       - name: Run bounded valid and invalid source-authored ExeFS inputs
         shell: bash
         run: |

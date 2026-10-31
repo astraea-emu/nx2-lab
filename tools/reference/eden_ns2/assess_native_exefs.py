@@ -14,20 +14,30 @@ import re
 MESSAGE = "NX2 original extended ExeFS guest reached debug SVC"
 MAX_LOG_SIZE = 20 * 1024 * 1024
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+LOG_PREFIX = r"(?:\[[ \t]*\d+\.\d+\][ \t]+)?"
 CLASSIFIED = re.compile(
-    r"Core <Info> core/core\.cpp:\d+:Load: "
+    LOG_PREFIX + r"Core <Info> core/core\.cpp:\d+:Load: "
     r"Switch 2 program: using the 12 GiB memory layout"
 )
 GUEST_OUTPUT = re.compile(
-    r"Debug\.Emulated <Info> core/hle/kernel/svc/svc_debug_string\.cpp:\d+:"
+    LOG_PREFIX + r"Debug\.Emulated <Info> core/hle/kernel/svc/svc_debug_string\.cpp:\d+:"
     r"OutputDebugString: " + re.escape(MESSAGE)
 )
 GUEST_EXIT = re.compile(
-    r"Kernel\.SVC <Info> core/hle/kernel/svc/svc_process\.cpp:\d+:"
+    LOG_PREFIX + r"Kernel\.SVC <Info> core/hle/kernel/svc/svc_process\.cpp:\d+:"
     r"ExitProcess: Process \d+ exiting"
 )
-LOADER_FAILURE = re.compile(
-    r"Core <Critical> core/core\.cpp:\d+:Load: Failed to load ROM"
+NPDM_FAILURE = re.compile(
+    LOG_PREFIX + r"Core <Critical> core/core\.cpp:\d+:Load: "
+    r"Failed to load ROM \(Error 4\)!"
+)
+FRONTEND_LOADER_FAILURE = re.compile(
+    LOG_PREFIX + r"Frontend <Critical> yuzu_cmd/yuzu\.cpp:\d+:SDL_AppInit: "
+    + re.escape(
+        "While attempting to load the ROM requested, an error occurred. Please "
+        "refer to the Eden wiki for more information or the Eden discord for "
+        "additional help."
+    )
 )
 EXECUTION_FAILURE = re.compile(
     r"\bassert(?:ion)?\b|ExceptionRaised|Cannot execute instruction at unmapped address|"
@@ -38,6 +48,33 @@ EXECUTION_FAILURE = re.compile(
 
 def normalize(raw: bytes) -> str:
     return ANSI_ESCAPE.sub("", raw.decode("utf-8", "replace")).replace("\0", "[NUL]")
+
+
+def source_lines(raw: bytes) -> list[str]:
+    # NUL separators occur at record boundaries in the real CLI logs. Preserve
+    # embedded NUL bytes so corrupted or host-prefixed records cannot be joined.
+    text = ANSI_ESCAPE.sub("", raw.decode("utf-8", "replace"))
+    return [line.strip("\0") for line in text.splitlines()]
+
+
+def expected_npdm_rejection(raw: bytes) -> bool:
+    # At frozen Eden e2f285ab, ErrorBadNPDMHeader is loader result 4 and
+    # SystemResultStatus::ErrorLoader is 7. The logger's enum formatter emits
+    # numeric 4; GetResultStatusString supplies the corresponding English text.
+    # Bind the complete frontend diagnostic to its real source record, rather
+    # than accepting an unrelated Error 4 or a host-echoed description.
+    lines = source_lines(raw)
+    core = [i for i, line in enumerate(lines) if NPDM_FAILURE.fullmatch(line)]
+    frontend = [i for i, line in enumerate(lines)
+                if FRONTEND_LOADER_FAILURE.fullmatch(line)]
+    if len(core) != 1 or len(frontend) != 1 or core[0] >= frontend[0]:
+        return False
+    block = lines[frontend[0] + 1:frontend[0] + 4]
+    return (len(block) == 3 and block[0] == "" and
+            block[1] == "Error Code: 0007-0004" and
+            block[2] in ("Error Description: 4",
+                         "Error Description: The NPDM file has a bad header."))
+
 
 def report(raw: bytes, label: str) -> str:
     text = normalize(raw)
@@ -63,17 +100,17 @@ def assess(valid_raw: bytes, invalid_raw: bytes, valid_rc: int, invalid_rc: int)
     print(f"NX2_NATIVE_INVALID_PROCESS_RC={invalid_rc}")
     good = report(valid_raw, "VALID")
     bad = report(invalid_raw, "INVALID")
-    classification = CLASSIFIED.search(good)
-    output = GUEST_OUTPUT.search(good)
-    exit_request = GUEST_EXIT.search(good)
-    native_classified = classification is not None
-    guest_logged = output is not None
-    exited_in_order = bool(classification and output and exit_request and
-                           classification.start() < output.start() < exit_request.start())
+    lines = source_lines(valid_raw)
+    classifications = [i for i, line in enumerate(lines) if CLASSIFIED.fullmatch(line)]
+    outputs = [i for i, line in enumerate(lines) if GUEST_OUTPUT.fullmatch(line)]
+    exit_requests = [i for i, line in enumerate(lines) if GUEST_EXIT.fullmatch(line)]
+    native_classified = len(classifications) == 1
+    guest_logged = len(outputs) == 1
+    exited_in_order = (native_classified and guest_logged and len(exit_requests) == 1 and
+                       classifications[0] < outputs[0] < exit_requests[0])
     # The negative fixture changes only META magic: an unrelated loader or
     # initialization failure is not the expected NPDM rejection.
-    invalid_diagnostic = bool(LOADER_FAILURE.search(bad) and
-                              "NPDM file has a bad header" in bad)
+    invalid_diagnostic = expected_npdm_rejection(invalid_raw)
     invalid_executed = bool(GUEST_OUTPUT.search(bad) or GUEST_EXIT.search(bad))
     invalid_fault = bool(EXECUTION_FAILURE.search(bad))
     # SDL_APP_FAILURE is 1. A signal or timeout after an error is not rejection.
