@@ -19,6 +19,23 @@ PROGRESS = (
     b"Adios! (main devuelve -> svcExitProcess)",
 )
 MAX_LOG_SIZE = 32 * 1024 * 1024
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+GUEST_OUTPUT = re.compile(
+    r"\bDebug\.Emulated\s+<Info>\s+"
+    r"core/hle/kernel/svc/svc_debug_string\.cpp:\d+:OutputDebugString:\s*(.*)"
+)
+LOADER_REJECTION = re.compile(
+    r"\b(?:Core|Frontend|Loader)\s+<(?:Critical|Error)>\s+"
+    r"(?:core/|yuzu_cmd/)[^\n]*:(?:Load|SDL_AppInit|main):\s*"
+    r"(?:Failed to load ROM|Failed to obtain loader)\b"
+)
+EXECUTION_FAULT = re.compile(
+    r"\b(?:Core\.ARM|Debug)\s+<(?:Critical|Error)>|"
+    r"\bExceptionRaised\b|Cannot execute instruction|"
+    r"\bassert\s*\(|\bassertion failed\b|\bassert failed\b|"
+    r"Segmentation fault|AddressSanitizer|UndefinedBehaviorSanitizer|runtime error:",
+    re.IGNORECASE,
+)
 LOG_MATCH = re.compile(
     r"nro|homebrew|loader|svc|thread|error|fault|failed|"
     r"hola desde|contador|suma en el heap|fibonacci|adios|nx2|"
@@ -26,6 +43,24 @@ LOG_MATCH = re.compile(
     r"could not|invalid|SDL|cannot",
     re.IGNORECASE,
 )
+
+
+def decoded_lines(raw: bytes) -> list[str]:
+    return ANSI_ESCAPE.sub("", raw.decode("utf-8", "replace")).replace("\0", " ").splitlines()
+
+
+def guest_messages(raw: bytes) -> list[tuple[int, str]]:
+    """Keep only messages attributed to the pinned emulator's debug SVC."""
+    messages = []
+    for index, line in enumerate(decoded_lines(raw)):
+        match = GUEST_OUTPUT.search(line)
+        if match:
+            messages.append((index, match.group(1).strip()))
+    return messages
+
+
+def has_execution_fault(raw: bytes) -> bool:
+    return any(EXECUTION_FAULT.search(line) for line in decoded_lines(raw))
 
 
 def print_log(label: str, raw: bytes) -> None:
@@ -54,24 +89,38 @@ def assess(good_log: bytes, bad_log: bytes, good_exit: int, bad_exit: int) -> bo
     print(f"NX2_BAD_NRO_PROCESS_EXIT={bad_exit}")
     print_log("GOOD", good_log)
     print_log("BAD", bad_log)
-    guest_started = GUEST_START in good_log
+    messages = [message for _, message in guest_messages(good_log)]
+    guest_started = GUEST_START.decode("ascii") in messages
     print("NX2_EDEN_GUEST_AUTHORED_DEBUG_STRING_OBSERVED" if guest_started
           else "NX2_EDEN_GUEST_EXECUTION_NOT_VERIFIED")
     for marker in PROGRESS:
         label = marker.decode("ascii")
-        print(f"NX2_EDEN_GUEST_MARKER_{'OBSERVED' if marker in good_log else 'NOT_OBSERVED'}={label}")
+        observed = any(message.startswith(label) for message in messages)
+        print(f"NX2_EDEN_GUEST_MARKER_{'OBSERVED' if observed else 'NOT_OBSERVED'}={label}")
     if good_exit in (124, 137):
         print("NX2_EDEN_POSITIVE_DID_NOT_EXIT_NATURALLY")
     if good_exit < 0:
         print("NX2_EDEN_POSITIVE_SIGNAL_FAILURE")
-    loader_rejected = any(x in bad_log for x in (
-        b"Failed to obtain loader", b"Failed to load ROM",
-        b"While attempting to load the ROM requested",
-    ))
-    bad_exit_ok = bad_exit not in (0, 124, 137) and bad_exit > 0
+    # SDL_APP_FAILURE maps to 1 for this frozen CLI. A signal encoded by the
+    # shell (for example 139), a timeout or an unrelated nonzero exit is not a
+    # successful invalid-image rejection, even if a loader line preceded it.
+    loader_rejected = any(LOADER_REJECTION.search(line) for line in decoded_lines(bad_log))
+    bad_exit_ok = bad_exit == 1
+    bad_fault = has_execution_fault(bad_log)
+    bad_executed = bool(guest_messages(bad_log))
+    original_status_ok = good_exit in (0, 124)
     print(f"NX2_EDEN_MALFORMED_LOADER_DIAGNOSTIC={int(loader_rejected)}")
     print(f"NX2_EDEN_MALFORMED_EXITS_WITHOUT_TIMEOUT={int(bad_exit_ok)}")
-    ok = guest_started and loader_rejected and bad_exit_ok
+    print(f"NX2_EDEN_MALFORMED_EXECUTION_FAULT={int(bad_fault)}")
+    print(f"NX2_EDEN_MALFORMED_GUEST_OUTPUT={int(bad_executed)}")
+    print(f"NX2_EDEN_ORIGINAL_EXECUTION_FAULT={int(has_execution_fault(good_log))}")
+    print("NX2_EDEN_ORIGINAL_RESULT_IS_EXECUTION_EVIDENCE_ONLY=1")
+    # This control qualifies loader rejection plus ordinary process termination.
+    # The frozen generic file detector can also log a crypto-probe assertion on
+    # corrupt magic; report it separately instead of claiming assertion-free
+    # loader behavior. The adapted lifecycle gate forbids every such fault.
+    ok = (guest_started and original_status_ok and loader_rejected and bad_exit_ok
+          and not bad_executed)
     print("NX2_EDEN_SOURCE_AUTHORED_GUEST_EXECUTION_PASS" if ok
           else "NX2_EDEN_SOURCE_AUTHORED_GUEST_EXECUTION_INCOMPLETE")
     return ok

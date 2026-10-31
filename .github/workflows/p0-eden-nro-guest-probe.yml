@@ -7,6 +7,8 @@ on:
       - '.github/workflows/p0-eden-nro-guest-probe.yml'
       - 'tools/reference/eden_ns2/assess_eden_guest.py'
       - 'tools/reference/eden_ns2/test_assess_eden_guest.py'
+      - 'tools/reference/eden_ns2/assess_adapted_nro.py'
+      - 'tools/reference/eden_ns2/test_assess_adapted_nro.py'
       - 'tools/reference/eden_ns2/add_nro_exit_thunk.py'
       - 'tools/reference/eden_ns2/test_add_nro_exit_thunk.py'
       - 'tools/reference/eden_ns2/nro_preflight.py'
@@ -38,6 +40,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -v -s tools/reference/eden_ns2 \
             -p test_assess_eden_guest.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_adapted_nro.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_add_nro_exit_thunk.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_nro_preflight.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_overlay_eden_exit.py
@@ -198,33 +201,9 @@ jobs:
             --program nx2-source-probe --null-render --singlecore --game "$RUNNER_TEMP/exit-thunk.nro"
           adapted_rc=$?
           set -e
-          echo "NX2_ADAPTED_NRO_PROCESS_EXIT=$adapted_rc"
-          export ADAPTED_LOG="$RUNNER_TEMP/adapted-guest.log"
           set +e
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          raw = Path(os.environ['ADAPTED_LOG']).read_bytes()
-          checks = {
-              'guest_debug_svc': b'Hola desde un NRO en NeXo 2!',
-              'guest_counter': b'Contador (.data): 42',
-              'guest_heap_sum': b'Suma en el heap: 499500',
-              'guest_fibonacci': b'fibonacci(50) = 12586269025',
-              'guest_final_output': b'Adios! (main devuelve -> svcExitProcess)',
-          }
-          for key, marker in checks.items():
-              print(f"NX2_ADAPTED_{key.upper()}={int(marker in raw)}")
-          fault = b'Cannot execute instruction at unmapped address' in raw
-          print(f"NX2_ADAPTED_UNMAPPED_PC_FAULT={int(fault)}")
-          print(f"NX2_ADAPTED_LOG_BYTES={len(raw)}")
-          for i, line in enumerate(raw.decode('utf-8','replace').replace('\0','[NUL]').splitlines()):
-              if any(x in line for x in ('OutputDebugString','ExitProcess','ExceptionRaised',
-                                         'Shutdown','Error','Critical')):
-                  print(f"NX2_ADAPTED_LOG[{i}]={line[:300]}")
-          if not all(marker in raw for marker in checks.values()) or fault:
-              raise SystemExit('NX2_ADAPTED_EXIT_PATH_NOT_VERIFIED')
-          print('NX2_ADAPTED_FINAL_GUEST_MESSAGE_NO_UNMAPPED_FAULT')
-          PY
+          python3 tools/reference/eden_ns2/assess_adapted_nro.py \
+            --log "$RUNNER_TEMP/adapted-guest.log" --exit "$adapted_rc"
           adapted_check=$?
           python3 tools/reference/eden_ns2/assess_eden_guest.py \
             --good-log "$RUNNER_TEMP/good-guest.log" \

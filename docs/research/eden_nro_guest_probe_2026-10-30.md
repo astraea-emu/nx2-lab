@@ -1,6 +1,6 @@
 # Issue #21 — Eden-NS2 bounded source-authored NRO execution experiment
 
-**Status: proposed, not yet verified. Do not claim guest execution unless the real frontend prints the original guest's diagnostic string.**
+**Status: source-authored Switch 1 NRO execution verified. The labeled return-thunk variant exited naturally and malformed magic was rejected in [run #41223767907](https://github.com/astraea-emu/nx2-lab/actions/runs/41223767907) at commit `09defff733d97b8e33d25714bda2019c3cac2a10`, using the isolated process/SDL lifecycle overlay. The strengthened acceptance below must pass on the new commit before merge.**
 
 ## Why this probe
 
@@ -20,9 +20,9 @@ The next real gate is to execute a source-authored ARM64 homebrew application th
 
 1. Frozen source and original NRO hashes pass validation.
 2. Real Eden CPU/HLE/GPU code and its command-line frontend build and link.
-3. A valid original homebrew executes and causes the exact diagnostic `Hola desde un NRO en NeXo 2!` to appear in the **Eden process output**. The string exists in guest source, and this check must not be satisfied by a host-authored echo, metadata label or fabricated fixture.
-4. A byte-corrupted NRO magic control is rejected by the frontend without being mistaken for a valid guest program. Its process must terminate rather than hang until the timeout.
-5. An emulator timeout, crash, unsupported host renderer, missing firmware or guest-output absence must be reported as **failure or incomplete evidence**; it must not be re-labelled as guest execution.
+3. The unchanged original homebrew produces `Hola desde un NRO en NeXo 2!` in a log line attributed to `Debug.Emulated / core/hle/kernel/svc/svc_debug_string.cpp / OutputDebugString`. Later guest messages, its known return-to-null fault and bounded timeout are reported independently. This control proves instruction execution only; it does not qualify natural completion. A host echo cannot supply guest-output evidence.
+4. The separate four-byte return-thunk variant must produce the original introduction, counter **42**, heap sum **499500**, Fibonacci(50) **12586269025** and final message in order through the genuine debug SVC. A genuine `Kernel.SVC / svc_process.cpp / ExitProcess` event must follow. Its process must return **0**, with no guest execution fault or assertion. A final message followed by timeout, crash or missing exit SVC fails this gate.
+5. The corrupted-magic control must emit the frozen frontend's typed loader error, return exactly **1** (`SDL_APP_FAILURE`) and produce no guest output. Other nonzero exits, including shell-encoded signals, do not prove terminating loader rejection. Assertion/fault diagnostics in this control are reported separately; the observed crypto-probe assertion below remains an unresolved loader limitation.
 
 A passed run proves only the original, source-authored Switch 1-style guest reached a guest-generated debug output through an Eden-derived CPU/HLE path. It would **not** prove Switch 2-native software, GPU rendering, a Nintendo game, legal device observations, Apple Silicon compatibility or readiness to select Eden-NS2 as production architecture.
 
@@ -64,6 +64,20 @@ The upstream source identifies a causal problem beyond the original guest: froze
 To test this while preserving original source provenance, the next revision applies `tools/reference/eden_ns2/overlay_eden_exit.py` **only to the ephemeral GPL checkout**. Original Git blobs `af1bdc7807e0f2c51aeee6edf1c8436b2c892bba` (`svc_process.cpp`) and `76a1dcd312686059cf2399843a5dc15454f15526` (`yuzu.cpp`) must match before edits. The overlay makes the genuine ExitProcess path call the existing `KProcess::Exit` and exposes a thread-safe atomic guest-exit request to the SDL event loop, while conditioning frontend full shutdown on `IsPoweredOn()`. This is a *candidate repair*, not a verified fix. Original CLI behavior from the earlier unpatched run remains a separate and immutable control, not represented as passing. An NX2-owned six-test source-overlay suite must pass before the expensive source build.
 
 **Do not claim clean exit or malformed-image rejection until the patched exact-head run demonstrates each independently.** Even a passing result would be a **patched frozen Eden fork**, and only for Switch 1-format original homebrew, never a Switch 2-native title/game.
+
+## Verified lifecycle result and stricter regression acceptance (2026-10-31)
+
+[Run #41223767907](https://github.com/astraea-emu/nx2-lab/actions/runs/41223767907), job `124603611364`, completed the full patched Eden build and all three independent trials at commit `09defff733d97b8e33d25714bda2019c3cac2a10`:
+
+| Input | Observed behavior | Process result |
+| --- | --- | --- |
+| Exact original NeXo NRO | Original introduction, computations and final message; then the known return-to-null guest fault | **124**, bounded timeout; execution evidence only |
+| Separately labeled return-thunk NRO | All original computations and final message; real `Kernel::Svc::ExitProcess`; no unmapped-PC fault | **0**, natural exit |
+| Corrupted NRO magic | `Core / core.cpp:339:Load: Failed to load ROM (Error 35)!`; no guest output; preceding crypto-probe assertion | **1**, terminating loader rejection; not assertion-free parsing |
+
+This establishes a successful bounded lifecycle experiment for the **patched frozen Eden build**. It does not establish a successful unmodified NRO return path or independently qualify every part of the overlay. Replaying the raw artifact (SHA-256 `6e1b9afbdd9982b386daee5066dbf966119bea30c2b2dc173c8a1bd8e0179fdb`) also exposed `core/crypto/aes_util.cpp:97` asserting `EVP_CipherInit_ex2` during malformed-magic identification. Frozen [`loader.cpp`](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/loader/loader.cpp) probes NCA after NRO magic fails, before filename fallback selects the NRO loader. The control therefore proves rejection and ordinary failure exit, **not assertion-free malformed-input handling**. This diagnostic remains visible and requires separate loader robustness work; it does not occur in the successfully adapted guest.
+
+Review found that the old workflow printed the adapted return code without requiring it and accepted any positive malformed-input status except 124/137. Thus a future timeout after guest output or a crash after a loader diagnostic could have appeared green. The revised workflow uses a separately tested `assess_adapted_nro.py`, requires natural adapted exit plus the real ExitProcess event, and rejects faults/assertions. `assess_eden_guest.py` now checks genuine debug-SVC provenance and requires exact negative-control status 1. Unit regressions include the previously observed exit-then-timeout behavior, loader-error-then-crash, host marker echoes, missing ExitProcess, incorrect computation, and the native experiment's priority assertion shape. Existing source hashes, guest bytes and lifecycle overlay remain unchanged. New CI must still run on this stricter revision; the successful previous run is evidence for its own commit.
 
 ## Next engineering decision
 
