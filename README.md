@@ -1,19 +1,16 @@
 # NX2 Lab
 
-Independent conformance tools and source-authored workloads for Switch 2
-emulation research. The MIT lab contains a small AArch64 correctness oracle
-and reproducible tests of separately built emulator runtimes.
+A research lab for Switch 2 emulation: original guest workloads, repeatable
+external-runtime tests and a small AArch64 CPU/memory correctness oracle.
 
-**Current result:** 62 native unit cases pass in a pinned Eden source build;
-original synthetic ExeFS guests also complete checked service-manager IPC and
-natural exit on Linux. **Next:** native display service lifecycle checked by the guest.
-Production-engine selection remains **HOLD**. No hardware ABI
-parity, guest-produced frame or commercial-game support is established.
-See [measured status](docs/STATUS.md) and [the active plan](docs/PLAN.md).
+Synthetic guests now complete checked service-manager IPC and natural exit
+in a pinned Eden build on Linux. NX2 has no verified guest-produced frame,
+developer SDK or game compatibility. The next milestone is an editable
+original graphics sample with independently checked pixels.
 
 ## Build and run
 
-Requires CMake 3.25+ and a C++23 compiler. Install Python 3 to include the
+Requires CMake 3.25+ and a C++23 compiler. Install Python 3.9+ to include the
 evidence checks in CTest.
 
 ```sh
@@ -26,36 +23,23 @@ ctest --test-dir build -C Debug --output-on-failure
 
 With a Windows multi-configuration generator, use `build/Debug/nx2lab.exe`.
 The demo executes two original AArch64 instructions and reports `x0=43`.
-`run-owned` accepts the small project-authored **NX2OWNED** test format.
-These commands exercise the local CPU/memory oracle; external emulator
-experiments have separate source-pinned workflows.
+`run-owned` accepts the project's small NX2OWNED fixture format. These commands
+exercise the local oracle; external engines use separate research workflows.
 
-## Find your way
+## Project guide
 
-| Need | Start here |
+| Document | Purpose |
 | --- | --- |
-| Verified results, limits and research records | [Status](docs/STATUS.md) |
-| Next workload and acceptance criteria | [Plan](docs/PLAN.md) |
-| Build, test and contribute | [Contributing](CONTRIBUTING.md) |
-| How architecture decisions change | [Adaptive strategy](docs/ADAPTIVE_STRATEGY.md) |
-| Authorized device research and evidence handling | [Security](docs/SECURITY.md) · [Research intake](docs/RESEARCH_INTAKE.md) |
+| [Status](docs/STATUS.md) | Measured results and current limits |
+| [Plan](docs/PLAN.md) | One active milestone and its acceptance criteria |
+| [Contributing](CONTRIBUTING.md) | Setup, checks and change requirements |
+| [Security](docs/SECURITY.md) | Authorized research and evidence handling |
+| [Evidence](docs/SOURCES.md) | Exact historical records and source revisions |
 
-| Location | Contents |
-| --- | --- |
-| [`include/nx2/`](include/nx2/) and [`src/`](src/) | Bounded CPU, memory, owned-image and service-stop oracle |
-| [`tests/`](tests/), [`fixtures/`](fixtures/), [`evidence/`](evidence/) | Original tests, tiny inputs and byte-hashed manifests |
-| [`tools/reference/`](tools/reference/) | External-runtime probes, generators, assessors and source-checked overlays |
-| [`.github/workflows/`](.github/workflows/) | Core CI and separately scoped runtime experiments |
-| [`docs/research/`](docs/research/) | Dated experiments, failures and exact provenance |
+The core lives in `include/nx2/` and `src/`; original inputs and checks live in
+`fixtures/`, `tests/` and `evidence/`. `tools/reference/` contains external-runtime
+probes, with their workflows in `.github/workflows/`.
 
-## Scope and license
-
-Original NX2 code and documentation are [MIT-licensed](LICENSE), unless marked
-otherwise. External GPL implementations stay in separate research builds;
-reusing or distributing them requires their own license review. Console
-firmware, keys, games and identifying device data do not belong in this repo.
-
-Guest execution uses the ordinary CI runner account, without a console.
-Build dependencies are installed separately in disposable CI environments.
-NX2 is independent of Astraea's PS5 work and is unaffiliated with Nintendo,
+Original NX2 files use the [MIT license](LICENSE), unless marked otherwise.
+External engines retain their own licenses. NX2 is unaffiliated with Nintendo,
 NVIDIA or the external emulator projects.

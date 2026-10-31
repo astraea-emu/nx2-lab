@@ -1,37 +1,30 @@
-# Public references — reviewed 2026-10-29
+# Evidence
 
-Source category, provenance, and confidence matter. This is not a list of
-things the new codebase has implemented.
+These records are frozen at
+[`23f536a21a6ca029a01da8c70e48d4d40628452c`](https://github.com/astraea-emu/nx2-lab/commit/23f536a21a6ca029a01da8c70e48d4d40628452c).
+They preserve source pins, input hashes, procedures, failures and measured
+limits. Historical next steps and coverage statements are superseded by
+[current status](STATUS.md) and [the active plan](PLAN.md).
 
-## Primary references
+| Experiment | Frozen records |
+| --- | --- |
+| CPU, memory and external ELF controls | [CPU reference baseline](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/cpu_reference_baseline_2026-10-31.md) |
+| Custom HBX ABI and original guest | [Host/QEMU intake](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/hblauncher_host_abi_2026-10-29.md) · [Original entry and write accounting](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/hblauncher_original_guest_2026-10-29.md) |
+| Eden original-header contracts | [Source qualification](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/runtime_baseline_eden_ns2_2026-10-30.md) |
+| Integrated build and native GPU tests | [Earlier build failures and reduced suite](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_ns2_full_build_gate_2026-10-30.md) · [Reconciliation, linked result and DMA exclusions](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_native_gpu_test_reconciliation_2026-10-31.md) |
+| NRO execution and input checks | [Original/adapted lifecycle and AES assertion](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_nro_guest_probe_2026-10-30.md) · [Conservative preflight and unresolved loader bounds](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_nro_input_preflight_2026-10-30.md) |
+| NPDM object reuse | [Original C++ failure and isolated reset](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_ns2_npdm_reload_2026-10-30.md) |
+| Synthetic native ExeFS | [Original fixture and priority correction](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_native_exefs_fixture_2026-10-30.md) · [Runtime lifecycle and checker correction](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_native_exefs_runtime_2026-10-31.md) |
+| Guest-checked service-manager IPC | [Observed replies, controls and interface limits](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/research/eden_native_ipc_runtime_2026-10-31.md) |
 
-- pepsipu, original ns2jb: https://gitlab.com/pepsipu/ns2jb
-  - Demonstrated tethered filesystem-sysmodule research on firmware 23.0.1.
-  - No public production custom firmware/kernel access claim.
-  - No permission or compatible license to copy its code established.
-- pepsipu, detailed research write-up:
-  https://pepsipu.com/blog/2026-10-switch2-jailbreak-ns2jb/
-- Nintendo official Switch 2 hardware specification:
-  https://www.nintendo.com/en-ca/gaming-systems/switch-2/tech-specs/
-- Community SoC research (provisional model-specific details):
-  https://switchbrew.org/wiki/Switch_2%3A_Tegra_T239
-- Nintendo current Switch 2 system releases:
-  https://www.nintendo.com/en-gb/Support/Nintendo-Switch-2/System-Update-Information-for-Nintendo-Switch-2-2843738.html
-- oboromi main repository: https://github.com/0xNikilite/oboromi
-- Pound main repository: https://github.com/pound-emu/pound
-- Ballistic ARM64 recompilation research: https://github.com/pound-emu/ballistic
-- mac2jb (Mac research; READ SECURITY.md before any use):
-  https://github.com/cpypwn/mac2jb
-- Source-owned homebrew infrastructure (Switch 1—not automatically Switch 2):
-  https://github.com/switchbrew/libnx
+Earlier context: [strategy](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/STRATEGY_2026-10-29.md),
+[architecture audit](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/COMPETITIVE_ARCHITECTURE_AUDIT_2026-10-30.md),
+[competitive snapshot](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/COMPETITIVE_RESEARCH_2026-10-29.md),
+and [research-lead matrix](https://github.com/astraea-emu/nx2-lab/blob/23f536a21a6ca029a01da8c70e48d4d40628452c/docs/COMPATIBILITY_EVIDENCE_MATRIX.md).
+The [complete documentation snapshot](https://github.com/astraea-emu/nx2-lab/tree/23f536a21a6ca029a01da8c70e48d4d40628452c/docs)
+also retains the former process, intake and publication records.
 
-## Confidence categories
-
-- **Verified here:** source-owned code compiled, tested and independently
-  reproducible on the host.
-- **Primary reported:** upstream publishes a dated result; not reproduced by us.
-- **Comparative:** third-party emulators or news; do not promote to hardware truth.
-- **Unknown:** behavior requiring independent lawful observation.
-
-The reported Switch 2 CPU/GPU architecture (T239, A78C, NVIDIA Ampere) helps
-choose research directions but is NOT an authenticated ABI/ISA test corpus.
+Git preserves these reports, not the lifetime of linked Actions artifacts.
+Artifact downloads have separate retention; a recorded digest does not make
+the raw archive permanently available. The records identify the pinned
+workflows and source needed for reproduction.

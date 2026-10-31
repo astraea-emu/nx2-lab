@@ -1,62 +1,52 @@
 # Contributing
 
-Start with [current status](docs/STATUS.md) and [the active plan](docs/PLAN.md).
-Keep each change tied to one measured failure or acceptance criterion.
+Tie each change to a measured failure or an acceptance criterion in the
+[active plan](docs/PLAN.md). [Status](docs/STATUS.md) owns current results;
+[Evidence](docs/SOURCES.md) links the complete historical records.
 
-## Run the local checks
+## Local checks
 
-The complete local check requires Git, Python 3.9+, CMake 3.25+, a C++23 compiler
-and GNU AArch64 binutils (`as`, `ld`, `objcopy`). On Debian/Ubuntu, the
-cross-assembler package is `binutils-aarch64-linux-gnu`.
-
-From the repository root:
+Requires Git, Python 3.9+, CMake 3.25+, a C++23 compiler and GNU AArch64
+binutils (`as`, `ld`, `objcopy`; Debian/Ubuntu: `binutils-aarch64-linux-gnu`).
+From the repository root, run:
 
 ```sh
 python3 tools/ci/check.py
 ```
 
-This checks local Markdown file links, configures a Debug build, runs CTest,
-runs first-party Python and ELF mutation checks, and assembles the original IPC fixture.
-It uses local source and fixtures; it does not fetch or execute an external
-emulator. Missing assembler tools fail the check instead of skipping cases.
-The default tool prefix is `aarch64-linux-gnu-`; use `NX2_AARCH64_PREFIX` when
-your GNU toolchain has a different prefix.
+This checks local Markdown file targets, builds the core, runs CTest and
+Python/ELF regressions, and assembles the original IPC fixture. It does not
+fetch or execute an external engine. Missing assembler tools fail the check.
+Use `NX2_AARCH64_PREFIX` for a tool prefix other than `aarch64-linux-gnu-`.
 
-Overlay tests that inspect upstream source run when `NX2_EDEN_SOURCE` points
-to the pinned Eden checkout; otherwise they are explicitly skipped locally.
-The GPU workflow supplies that source and requires the linked runtime tests.
+`--build-dir PATH` selects a build directory; `--python-only` omits the core
+build and CTest. The portable [core quick start](README.md#build-and-run)
+works without a cross-assembler on Linux, Windows and macOS.
 
-Use `--build-dir PATH` for a separate build directory. `--python-only` runs
-the Python and assembly checks without repeating the core build/CTest.
-For the portable core-only build on Linux, Windows or macOS, follow the
-[README commands](README.md#build-and-run); no cross-assembler is needed.
+Source-backed overlay tests require `NX2_EDEN_SOURCE` pointing to the pinned
+Eden checkout; they explicitly skip locally without it. The GPU workflow
+supplies that source and requires the runtime checks.
 
 ## External-runtime changes
 
-The workflows in [`.github/workflows/`](.github/workflows/) define separately
-pinned experiments. A change to a reference probe, fixture, assessor or overlay
-needs its relevant runtime workflow as well as the local checks. Record the
-exact tested revision and original runtime output. A passing generator or
-mock is not evidence that the guest ran in the external engine.
+A reference probe, fixture, assessor or overlay change needs its relevant
+[workflow](.github/workflows/) as well as local checks. Record the tested
+revision, actual runtime output, limitations and a negative control. A passing
+generator or mock does not establish guest execution or hardware behavior.
 
-Keep external implementation and test bodies in their separate source builds.
-Source overlays must verify the expected input revision/blob and replacement
-sites, and report the applied diff. Preserve original assertions and make any
-omitted coverage explicit.
+Keep external implementation and test bodies in separate source builds.
+Overlays must verify input revisions/blobs and replacement sites, report the
+applied diff, preserve original assertions and declare omitted coverage.
+Review provenance and dependency licenses before reusing external code.
 
-## Make the change reviewable
+## Before merging
 
-Explain the observed problem, the behavior changed, the evidence and tests,
-and the remaining limitation. Include a positive and negative control for a
-behavior change. Documentation changes should keep links valid and distinguish
-current status from dated observations; preserve historical failures and pins.
-Use successful checks for the PR's final tested head before merging.
+Explain the problem, resulting behavior, verification and remaining limits.
+Use positive and negative controls for behavior changes. Keep documentation
+links valid, preserve historical failures and source pins, and require passing
+checks for the final PR head. Add a document only when the existing six cannot
+serve a distinct reader need; record routine investigation in the relevant issue.
 
-Original NX2 files are MIT-licensed. Review provenance and dependency licenses
-before cross-project reuse. Do not commit console firmware, keys, games,
-credentials or identifying captures. See [the research scope](docs/SECURITY.md).
-
-Evidence manifests hash exact bytes. Preserve the repository's LF text and
-binary-fixture rules when editing inputs; verify affected manifests after a
-change. Source-backed format experiments do not by themselves establish a
-Nintendo hardware ABI.
+Evidence manifests hash exact bytes: preserve the repository's LF and binary
+fixture rules and verify affected manifests. Original NX2 files are MIT-licensed;
+follow the [research scope](docs/SECURITY.md) for inputs, data and disclosure.

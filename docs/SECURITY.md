@@ -1,32 +1,48 @@
-# Security, clean-room and responsible device research
+# Research boundaries
 
-Scope: controlled research on hardware and software you are authorized to
-examine. This repository contains no payloads, unauthorized access tooling,
-firmware, decryption keys, content dumps, or arbitrary device-modification
-scripts. Public CI must not contact a console.
+NX2 has made no physical-console observations. Public CI must not contact a
+console. Research is limited to software, devices, accounts and networks we
+are authorized to examine.
 
-The original ns2jb is a complex, timing-sensitive proof-of-concept requiring
-specific firmware and software. A reported filesystem-service execution path
-is not a persistent custom firmware or kernel exploit. Do not treat a third-
-party fork as authenticated simply because it builds. Check source revision,
-license, reproducibility and potential host/console effects first.
+## Authorization and execution
 
-`mac2jb` publishes a USB-host workflow which may require reducing macOS
-System Integrity Protection and/or installing an unsigned extension. **Do not
-change SIP/security settings or run it on a primary personal Mac as an
-unreviewed convenience step.** Use a dedicated disposable research setup,
-review all code and vendor drivers first, and obtain explicit authorization.
+Obtain explicit, informed approval before any risk-bearing device or host
+change. Establish the exact target, firmware, source revision, permitted scope,
+expected effects, clean baseline, recovery route and abort conditions first.
+Prefer small, non-destructive observations. Console updates and automatic
+exploit execution are outside the default workflow.
 
-For any future approved hardware observation: document exact firmware,
-minimal source build, device model, effective permissions, risk/abort plan,
-expected effects, clean baseline, reproducibility and data minimization.
-No account tokens, console identifiers, firmware dumps, game bytes or keys
-should be collected into public reports. Never test third-party devices,
-accounts or networks without consent. Coordinate responsibly with upstream
-maintainers when discovering a new flaw.
+Do not disable SIP or other host protections, install unsigned drivers, or
+run unreviewed device tools on a primary personal machine as a convenience
+step. Use a dedicated disposable research setup and review code, dependencies
+and possible host/console effects before execution.
 
-Jurisdiction matters. In Canada, Copyright Act section 41.12 includes a
-purpose-specific interoperability exception; it does not grant blanket
-permission to distribute decryption tools or copyrighted software. Nintendo's
-console terms contain separate restrictions. Seek qualified legal advice for
-shipping security circumvention software or commercial game support.
+External runtime experiments use pinned public source in separate disposable
+builds, without personal credentials or console access. Check provenance and
+dependency licenses before reuse or redistribution. Keep external implementation
+source in its separate build. Input preflight and process timeouts do not
+establish safe handling of arbitrary inputs or host containment.
+
+## Evidence
+
+Distinguish reproduced host behavior, attributed upstream reports, authorized
+local device observations and unverified hypotheses. Record the exact source
+and date, observed effects, negative results and limits. For device evidence,
+identify firmware, execution context, effective privileges and duration; leave
+unknown fields unknown. Keep confidential raw observations outside public Git.
+
+Host execution, screenshots and source-model tests do not establish hardware
+ABI fidelity. System-module access does not establish kernel control or
+persistence. A graphics demonstration does not establish native executable
+loading. Report only the behavior actually checked.
+
+## Data and disclosure
+
+Never publish Nintendo firmware or game bytes, keys, proprietary SDK/code, device
+certificates or identifiers, account/session tokens, credentials, identifying
+USB captures, or unredacted host logs. Collect only what the approved experiment
+needs; publish redacted findings and reproducible project-authored fixtures.
+
+Coordinate new vulnerability findings privately with the affected maintainers
+through their disclosure process. Keep private vulnerability details out of
+public issues, pull requests and reports while coordinated disclosure is pending.
