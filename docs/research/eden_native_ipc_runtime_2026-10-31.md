@@ -128,7 +128,8 @@ when no explicit size is present.
 Production-engine selection remains HOLD. Original loader bounds and the
 malformed-NRO crypto-probe assertion remain production-safety blockers; the
 known ExeFS input does not traverse that failing identification path. The 31
-unqualified macro-interpreter tests, dependency/license review, containment,
+unqualified cases in the excluded native-GPU test file (eight MME cases and
+23 other GPU cases), dependency/license review, containment,
 hardware-backed semantics, GPU output and relevant host-platform testing remain
 separate acceptance conditions. This experiment advances one known workload;
 it does not commit NX2 to a production fork or claim game compatibility.
