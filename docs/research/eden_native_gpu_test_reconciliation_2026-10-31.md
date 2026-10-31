@@ -2,25 +2,56 @@
 
 **Audit date:** 2026-10-31
 
-**Status:** a source-guarded overlay and strict result checker are implemented; the linked Catch2 gate awaits execution. No restored integrated pass is claimed.
+**Status:** the linked strict-mode gate passed **62 cases / 25,395 assertions**, with zero failures or skips and process status 0. Two DMA cases remain explicitly excluded and unqualified; production-engine selection remains HOLD.
 
-The excluded `native_gpu_characteristics.cpp` translation unit contains **31 cases: 8 about MME and 23 about other native GPU behavior**. Seven cases use a stale interpreter interface. Source review identifies **24 unchanged candidates and 5 compatibility candidates**, giving **29 candidates for restoration**. The remaining **2 cases mix interpreter checks with DMA contracts that changed in the production caller**. Those two require a semantic decision; an API rename is insufficient.
+The previously excluded `native_gpu_characteristics.cpp` translation unit contains **31 cases: 8 about MME and 23 about other native GPU behavior**. Seven cases use a stale interpreter interface. The initial source audit identified **24 unchanged candidates and 5 compatibility candidates**; all 29 subsequently passed in the linked run below. The remaining **2 cases mix interpreter checks with DMA contracts that changed in the production caller**. Those two still require a semantic decision; an API rename is insufficient.
 
-These counts describe the scope of the next qualification change. They are **not a claim that 29 cases have passed**. The full frozen upstream test suite remains unqualified. This audit neither adopts the engine for production nor establishes GPU hardware parity, a rendered frame, or game compatibility.
+## Observed integrated result — October 31
+
+[Run 41245699243, job 124668548648](https://github.com/astraea-emu/nx2-lab/actions/runs/41245699243/job/124668548648)
+passed at [PR #34](https://github.com/astraea-emu/nx2-lab/pull/34) head
+[`3936bc66f7b353ab053e5c12666cf1f37110fe80`](https://github.com/astraea-emu/nx2-lab/commit/3936bc66f7b353ab053e5c12666cf1f37110fe80).
+The Linux job built the actual linked target from Eden-NS2
+`e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c`, with the recorded build correction
+and test overlay, and executed it with **`EDEN_NATIVE_STRICT=1`**.
+
+| Coverage | Observed result |
+| --- | --- |
+| Previously excluded file | **29 executed and passed:** 24 unchanged bodies and five compatible adaptations |
+| Existing native/graphics-supervisor controls | **33 executed and passed** |
+| Combined | **62 cases / 25,395 assertions; zero failures or skips; exit status 0** |
+
+The 33 existing cases comprise 22 graphics-supervisor, seven semaphore and
+four shader cases. The actual reporter was **Catch2 3.7.1**, XML format 3;
+the runner used CMake 4.4.4 and Clang 21.1.8. The archived diff reconstructs
+exactly the two declared modified source files, with all 18 guarded inputs
+and the retained original assertions independently checked.
+
+The downloaded nine-file evidence archive has SHA-256
+`bf6662aee8c808aa03b95ca74830c163851718ddf16b00222410be3b62387fc8`.
+Independent replay of the assessor and inspection of the XML inventories
+confirmed the result. The archive preserves the manifest, applied diff,
+upstream license, registration/execution XML, environment, process status,
+run log and assessment.
+
+The two disabled DMA cases are outside the executed inventory and remain
+unqualified. **The complete frozen upstream suite is still unqualified.**
+This bounded source-model result establishes no guest-produced pixels,
+GPU hardware parity, game compatibility or production-engine adoption.
 
 ## Context and evidence boundaries
 
-The earlier full-build experiment failed while compiling this file after the isolated texture-cache cast correction. The current reduced-suite workflow removes the file's single CMake entry, which removes all 31 cases together. The [full-build qualification record](eden_ns2_full_build_gate_2026-10-30.md) preserves that failure and exclusion.
+The earlier full-build experiment failed while compiling this file after the isolated texture-cache cast correction. That earlier reduced-suite workflow removed the file's single CMake entry, excluding all 31 cases together. The [full-build qualification record](eden_ns2_full_build_gate_2026-10-30.md) preserves that failure and exclusion.
 
-The work described here has three distinct evidence levels:
+The initial audit and later execution provide three distinct evidence levels:
 
 | Evidence | What it establishes | Limit |
 |---|---|---|
-| Exact frozen-source inspection | Case inventory, public API differences, ownership of DMA operations, and current control flow | Does not establish that the complete test target compiles or passes |
-| Temporary host execution of the unchanged frozen interpreter header | Five adapted test bodies retained their original assertion expectations and completed 131 assertion evaluations | A local supporting observation, outside Catch2 and the integrated emulator |
-| Future restored Catch2 execution | Would establish which explicitly included cases compile and pass in the frozen linked test target | Has not occurred as part of this audit |
+| Initial frozen-source inspection | Case inventory, public API differences, ownership of DMA operations, and current control flow | Does not establish that the complete test target compiles or passes |
+| Initial temporary host execution of the unchanged frozen interpreter header | Five adapted test bodies retained their original assertion expectations and completed 131 assertion evaluations | A local supporting observation, outside Catch2 and the integrated emulator |
+| Linked Catch2 execution in run 41245699243 | The declared 29 restored and 33 existing cases built and passed under strict mode | Two DMA cases and the complete upstream suite remain unqualified; no guest graphics workload ran |
 
-The local helper and its build artifacts were temporary and are not persisted in this repository. The local observation therefore has no repository reproduction command or durable regression gate. A subsequent implementation must preserve its own reviewable adaptation, source guards, and execution evidence before promoting the result.
+The initial local helper and its build artifacts were temporary and were not persisted in this repository. That observation alone had no durable regression gate. The subsequently committed overlay, source-backed checks and linked workflow now preserve a reviewable adaptation and reproducible acceptance gate; the temporary result remains supporting historical evidence.
 
 ## Frozen sources
 
@@ -48,7 +79,7 @@ At this revision the interpreter is implemented in `macro_turing.h`; there is no
 
 ## Complete 31-case map
 
-Topics below are paraphrased inventory labels, not copied test bodies. Start lines refer to the frozen test translation unit linked above.
+Topics below are paraphrased inventory labels, not copied test bodies. Start lines refer to the frozen test translation unit linked above. The U/C/D labels preserve the original pre-run assessment; all U and C cases subsequently passed in the declared linked scope.
 
 - **U — unchanged candidate:** referenced APIs match the frozen implementation by inspection.
 - **C — compatibility candidate:** input representation or entry-point adaptation can preserve the original assertions.
@@ -90,9 +121,13 @@ Topics below are paraphrased inventory labels, not copied test bodies. Start lin
 
 The **23 non-MME cases plus the MME upload case** make up the 24 unchanged candidates. The **four raw-program interpreter cases plus the persistent-data-RAM case** make up the five compatibility candidates. The two disputed cases are both MME-related. The accounting is therefore **24 + 5 + 2 = 31**, with **8 MME + 23 other = 31**.
 
-An unchanged API does not guarantee a passing assertion or a successful integrated link. Those outcomes remain part of the next run.
+An unchanged API alone did not guarantee a passing assertion or successful integrated link. The observed run above subsequently established those outcomes for the 29 selected cases.
 
 ## Compatibility adaptations that preserve the assertions
+
+**Initial audit rationale.** The following candidate analysis and temporary
+observations of 53 and 131 assertion evaluations preceded the committed
+overlay and linked run.
 
 ### Four raw-program cases: mutable parameter FIFO
 
@@ -134,16 +169,16 @@ This audit does not establish which DMA limit matches hardware. Restoring the ol
 
 ## QMD strict mode is part of the tested contract
 
-The excluded test file sets `EDEN_NATIVE_STRICT=1` in a static initializer before its cases execute. Preserve that assumption when restoring the translation unit. [Test setup](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/tests/core/native_gpu_characteristics.cpp#L21-L31)
+The original test file sets `EDEN_NATIVE_STRICT=1` in a static initializer before its cases execute. The overlay preserves that setup, and the linked run also set the environment explicitly. [Test setup](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/tests/core/native_gpu_characteristics.cpp#L21-L31)
 
 The [QMD scheduler](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/video_core/native_qmd.h#L32-L118) has two relevant paths:
 
 - Its overload without a supplied dispatch callback rejects nonempty shader work during validation.
 - When a supplied dispatch callback returns false for nonempty work, strict mode returns a dispatch-required error before completion. Without the strict environment variable, the scheduler records skipped dispatch, marks the QMD completed, processes releases and dependent work, and returns a skipped-dispatch status.
 
-Thus a release, dependency signal, or completion flag alone is insufficient evidence that shader work executed. The five restored QMD cases would qualify their stated strict-mode assertions. They would not establish correct default fallback behavior or successful GPU dispatch.
+Thus a release, dependency signal, or completion flag alone is insufficient evidence that shader work executed. The five restored QMD cases passed their stated strict-mode assertions. They do not establish correct default fallback behavior or successful GPU dispatch.
 
-The scheduler checks the presence of the environment variable and caches the result within the instantiated function. The qualification setup should establish the environment before executing the relevant code and record it in the run. This source observation does not retroactively establish the environment used by other translation units or earlier runs.
+The scheduler checks the presence of the environment variable and caches the result within the instantiated function. The qualification run established the environment before execution and recorded it in the evidence artifact. This source observation does not retroactively establish the environment used by other translation units or earlier runs.
 
 ## Implemented qualification gate
 
@@ -160,9 +195,9 @@ requires matching registration and execution inventories for **29 restored +
 33 existing cases**, including exact names, source files and tags. Nonzero
 exit, missing cases, failures and skips fail the gate. The artifact retains
 the source diff, upstream license, manifest, XML reports and process status.
-Local verification passed 18 overlay checks, including 14 with the frozen
-source, and 26 report-checker regressions; these do not replace the pending
-linked run.
+Initial local verification passed 18 overlay checks, including 14 with the
+frozen source, and 26 report-checker regressions. These remain separate from
+the subsequent linked result recorded above.
 
 An upstream comparison through
 [`b2cef0c0f2e8517673233e22c929918e2c60e654`](https://github.com/0x2593/Eden-NS2/compare/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c...b2cef0c0f2e8517673233e22c929918e2c60e654)
@@ -174,7 +209,7 @@ The qualification source remains frozen at `e2f285ab1ecd3a2475c2ccad66f23b06b94e
 
 ## Implementation scope and review rationale
 
-The overlay reconciles the tests against the exact candidate source in an ephemeral checkout. The GPL implementation and test bodies stay in that checkout; this MIT repository contains original tooling, the source identities, and the research/acceptance record. Linked execution remains pending.
+The overlay reconciles the tests against the exact candidate source in an ephemeral checkout. The GPL implementation and test bodies stay in that checkout; this MIT repository contains original tooling, the source identities, and the research/acceptance record. The pre-run review criteria below are preserved as history; the bounded linked execution has now passed.
 
 1. **Guard the input.** Verify the exact upstream commit and the test, interpreter, macro-caller, and CMake blobs before applying a compatibility overlay. Fail on a mismatch or an unexpected number of replacement sites.
 2. **Restore unchanged coverage.** Preserve the 23 non-MME cases and the upload/storage case, including their assertions and strict-mode setup. Replace the current whole-file CMake exclusion with an explicitly documented reconciliation.
@@ -187,7 +222,7 @@ A later change can reconcile the DMA cases at the current production ownership b
 
 ## Acceptance and remaining qualification limits
 
-Acceptance for the first restoration slice requires all of the following:
+The observed run met the first restoration slice's acceptance criteria:
 
 - The 31-case accounting is preserved, including any two specifically unresolved DMA cases.
 - The 24 unchanged cases retain their original bodies and assertions.
@@ -196,8 +231,8 @@ Acceptance for the first restoration slice requires all of the following:
 - Test failures, host faults, skipped cases, and omitted cases are visible in the resulting evidence.
 - The reported result distinguishes the original frozen source from the explicitly patched test checkout.
 
-Until that execution occurs, **29 remains a candidate count**. The temporary five-body result is only supporting evidence for the proposed adaptation.
+**All 29 restored cases have now executed and passed within the declared scope**, alongside the 33 existing cases. The two disabled DMA cases remain unresolved. The temporary five-body result remains earlier supporting evidence, separate from integrated execution.
 
 The native macro engine also has a separate x86 JIT path enabled by default when available. Interpreter-only checks do not qualify that implementation. [JIT selection](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/video_core/macro.cpp#L1470-L1495)
 
-A successful restored unit-test slice would improve confidence in the behavior those cases assert. It would still leave actual graphics service use, GPU command execution, shader execution, guest-produced frame output, and broader engine adoption as separate evidence gates.
+The passing restored unit-test slice qualifies the behavior those cases assert. Actual guest graphics-service use, GPU command and shader execution, guest-produced frame output, and broader engine adoption remain separate evidence gates.
