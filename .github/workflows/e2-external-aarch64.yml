@@ -5,13 +5,14 @@ on:
     paths:
       - '.github/workflows/e2-external-aarch64.yml'
       - 'tools/reference/external_arm64/**'
-      - 'docs/STATUS.md'
-      - 'src/cpu.cpp'
-      - 'src/owned_image.cpp'
-      - 'src/main.cpp'
+      - 'CMakeLists.txt'
+      - 'src/**'
       - 'include/nx2/**'
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   external-source-first-stop:
     name: External AArch64 first genuine instruction
@@ -19,6 +20,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install deterministic toolchain
         run: |
           sudo apt-get update
@@ -157,5 +160,5 @@ jobs:
           python3 tools/reference/external_arm64/profile_external_elf_selftest.py |
             tee "$RUNNER_TEMP/elf-negatives.txt"
           grep -Fx 'NX2_EXTERNAL_ELF_NEGATIVES_PASS' "$RUNNER_TEMP/elf-negatives.txt"
-          grep -Fx 'invalid_elf_cases=16' "$RUNNER_TEMP/elf-negatives.txt"
+          grep -Fx 'invalid_elf_cases=19' "$RUNNER_TEMP/elf-negatives.txt"
           grep -Fx 'literal_target_mutations=refused' "$RUNNER_TEMP/elf-negatives.txt"

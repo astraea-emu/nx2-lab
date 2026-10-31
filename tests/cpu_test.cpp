@@ -99,5 +99,5 @@ int main() {
     require(wrong_width_literal.stop == StopReason::unsupported_instruction &&
             wrong_width_literal.retired == 0,
             "unsupported 32-bit literal load silently admitted");
-    std::cout << "SOURCE_OWNED_AARCH64_CONTRACT_PASS:11_cases\n";
+    std::cout << "SOURCE_OWNED_AARCH64_CONTRACT_PASS\n";
 }

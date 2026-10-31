@@ -91,7 +91,7 @@ def render(names, state, old, timestamp):
         "**Metadata-only watch.** A commit, successful CI run, screenshot or author's"
         " README is not a verified Switch 2 emulator capability.",
         "",
-        "Checked UTC: \`" + timestamp + "\`. Source: public GitHub REST API.",
+        "Checked UTC: `" + timestamp + "`. Source: public GitHub REST API.",
         "",
         "| Repository | Head | Since last scan | Latest GitHub Actions run |",
         "| --- | --- | --- | --- |"
@@ -109,7 +109,7 @@ def render(names, state, old, timestamp):
         else:
             result = re.sub(r"[^a-zA-Z0-9_-]", "", run["conclusion"])
             ci = result + (" (exact HEAD)" if run["sha"] == sha else " (other SHA)")
-        lines.append("| [{0}](https://github.com/{0}) | [\`{1}\`](https://github.com/{0}/commit/{2}) | {3} | {4} |".format(
+        lines.append("| [{0}](https://github.com/{0}) | [`{1}`](https://github.com/{0}/commit/{2}) | {3} | {4} |".format(
             name, sha[:12], sha, status, ci))
     changed = sum(name in old and old[name].get("sha") != state[name]["sha"] for name in names)
     lines += [

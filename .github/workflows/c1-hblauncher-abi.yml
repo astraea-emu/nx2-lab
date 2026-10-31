@@ -5,9 +5,11 @@ on:
     paths:
       - '.github/workflows/c1-hblauncher-abi.yml'
       - 'tools/reference/hblauncher/**'
-      - 'docs/research/hblauncher_host_abi_2026-10-29.md'
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   pinned-native-sdk-abi:
     name: Pinned external HBX AArch64 host ABI
@@ -15,6 +17,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install host-only AArch64 test dependencies
         run: |
           sudo apt-get update

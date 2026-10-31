@@ -6,7 +6,7 @@
 
 The merged [PR #27](https://github.com/astraea-emu/nx2-lab/pull/27) established that Eden-NS2's integrated CPU, loader, Horizon HLE and GPU libraries build (with one narrowly documented upstream Clang cast correction), and that 33 *included* upstream graphics-related test cases pass. That does **not** establish guest execution. The 31 cases in one excluded native-GPU test translation unit remain unqualified because its MME tests use obsolete APIs; [eight are MME-related and 23 cover other GPU behavior](eden_ns2_full_build_gate_2026-10-30.md).
 
-The next real gate is to execute a source-authored ARM64 homebrew application through the **actual integrated Eden command-line process**, instead of another isolated header test. Eden includes an NRO loader and an SDL3 null-renderer command-line frontend, so a zero-proprietary-data attempt is possible.
+This experiment executes a source-authored ARM64 homebrew application through the **actual integrated Eden command-line process**, instead of another isolated header test. Eden includes an NRO loader and an SDL3 null-renderer command-line frontend, so a zero-proprietary-data attempt is possible.
 
 ## Original inputs, provenance and isolation
 

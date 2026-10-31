@@ -1,5 +1,7 @@
 # Switch 2 research evidence matrix — provisional v0 (2026-10-29)
 
+> **Dated research leads.** These hypotheses and candidate checks are not the active backlog. See [the current plan](PLAN.md); [status](STATUS.md) records measured progress.
+
 **Purpose:** inventory falsifiable, *public-source* hypotheses and select the
 smallest meaningful conformance workloads. This is **not** a platform spec,
 hardware trace, security finding or proof of software compatibility.

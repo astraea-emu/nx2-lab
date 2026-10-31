@@ -124,5 +124,5 @@ int main() {
     require(shifted.retired == 1 && shifted.stop == StopReason::breakpoint &&
             memory.load64(kBase + 8).value() == initial.x[0],
             "scaled offset store incorrect");
-    std::cout << "OWNED_GUEST_MEMORY_CONTRACT_PASS:25_checks\n";
+    std::cout << "OWNED_GUEST_MEMORY_CONTRACT_PASS\n";
 }

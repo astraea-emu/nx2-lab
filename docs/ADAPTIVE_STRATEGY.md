@@ -4,9 +4,12 @@
 
 **Implementation is flexible:** Runtime baseline, CPU/GPU backend, milestones and research priorities are hypotheses. We change them only in response to measured evidence. The MIT NX2 Lab stays separate from any properly licensed GPL-derived production runtime. We neither copy incompatible code nor publish proprietary firmware, keys or games.
 
-## Current execution gate
+## Current decision and next gate
 
-The primary gate is [#21](https://github.com/astraea-emu/nx2-lab/issues/21): choose a qualified mature emulator runtime or an upstream-first path, based on a frozen, independently reproducible, source-owned workload. HBX stage 2 ([#20](https://github.com/astraea-emu/nx2-lab/issues/20)) is a bounded regression, not the primary milestone.
+[Status](STATUS.md) records measured results and the current engine decision.
+[Plan](PLAN.md) defines the active workload and acceptance criteria. This
+document defines how those decisions change; dated strategy proposals remain
+historical records.
 
 There is only **one primary engineering gate** at a time. A gate requires a runnable acceptance test, explicit unsupported boundary and a credible next vertical slice. Finish or explicitly reject/reframe it before starting another unrelated one.
 

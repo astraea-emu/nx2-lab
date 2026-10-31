@@ -1,5 +1,7 @@
 # E3 original HBLauncher Hello CPU stage 1 — checked guest execution research
 
+> **Historical HBX control.** The sections below record direct entry first, then the later original `_start` result and write accounting. The proposed stage 2 remains secondary to [the active plan](../PLAN.md).
+
 **Scope:** first NX2-owned experimental ARM64 runtime to attempt the *original*
 external `hbx_app_main` code. The binary is produced from the unmodified
 HBLauncher source pinned at `18b4748ba98eeac7df17beb5d3418985eb74897c`.

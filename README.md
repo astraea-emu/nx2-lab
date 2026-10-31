@@ -1,117 +1,61 @@
-# nx2-lab
+# NX2 Lab
 
-**Independent, clean-room Nintendo Switch 2 security research and emulation foundations.**
+Independent conformance tools and source-authored workloads for Switch 2
+emulation research. The MIT lab contains a small AArch64 correctness oracle
+and reproducible tests of separately built emulator runtimes.
 
-> **Status (2026-10-31): synthetic native-classified guest lifecycle and IPC verified.**
-> NX2's original extended-ExeFS ARM64 guest completed a real service-manager
-> roundtrip in the source-built, patched Eden runtime, checked the returned
-> values in its own memory, closed its handles and exited naturally. The
-> separate debug/exit guest and invalid-META rejection controls also passed;
-> [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) merged after all seven
-> checks passed. The next primary slice is strict native-GPU qualification.
-> See [measured results and the next gate](docs/STATUS.md). Production-engine
-> selection remains HOLD. This is Linux host evidence for a synthetic process,
-> not hardware-backed Switch 2 ABI, a guest-produced frame, commercial game
-> support, or an exploit.
+**Current result:** an original synthetic ExeFS guest completes process
+startup, service-manager IPC, reply checks, handle cleanup and natural exit in
+a pinned, patched Eden runtime on Linux. **Next:** strict native-GPU
+qualification. Production-engine selection remains **HOLD**. No hardware ABI
+parity, guest-produced frame or commercial-game support is established.
+See [measured status](docs/STATUS.md) and [the active plan](docs/PLAN.md).
 
-## Current direction — one evidence-driven gate
+## Build and run
 
-The primary milestone is [#21: qualify a mature emulator runtime or upstream-first path](https://github.com/astraea-emu/nx2-lab/issues/21), with a reproducible, lawful source-owned workload. HBLauncher stage 2 ([#20](https://github.com/astraea-emu/nx2-lab/issues/20)) remains a bounded research regression, not the primary product milestone.
-
-**Do not replan merely because a new competitor repo or screenshot appears.**
-Follow [Adaptive Strategy: decision rules, evidence thresholds and review cadence](docs/ADAPTIVE_STRATEGY.md). The [weekly metadata-only competitive radar](.github/workflows/competitive-radar.yml) tracks selected public repositories and updates one issue; it never decides architecture or automatically changes the codebase.
-
-See the [October 30 competitive architecture audit](docs/COMPETITIVE_ARCHITECTURE_AUDIT_2026-10-30.md) and [live status](docs/STATUS.md). The tiny interpreter is a correctness oracle; it must not grow into a new whole-console implementation without an independently measured reason.
-
-## Why a separate project?
-
-Astraea is a PS5 compatibility research emulator. This repository targets
-Switch 2 research and eventual emulation without sharing proprietary content,
-untested system-service guesses, or incompatible third-party code. The
-security-research and emulator workstreams are related but **independently gated**.
-
-## Quick start
-
-These commands build the small **NX2-owned CPU/memory correctness oracle**.
-The external runtime qualification workflows are separate and listed in
-[live status](docs/STATUS.md).
-
-CMake 3.25+ and a C++23 compiler:
+Requires CMake 3.25+ and a C++23 compiler. Install Python 3 to include the
+evidence checks in CTest.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+cmake --build build --config Debug --parallel 2
+ctest --test-dir build -C Debug --output-on-failure
 ./build/nx2lab demo
-./build/nx2lab memory-demo
 ./build/nx2lab run-owned fixtures/owned-aarch64-demo.nx2o
-./build/nx2lab run-owned fixtures/owned-aarch64-service.nx2o
-python3 tools/verify_evidence.py evidence/owned-aarch64-fixture.json
 ```
 
-On Windows, run the `nx2lab` executable under `build/Debug/` if using a multi-config generator.
-The `run-owned` command loads and executes a **28-byte, strictly parsed,
-source-owned NX2OWNED v1 program image**. This is an NX2 Lab testing format,
-not a Nintendo NSO/NRO/NCA/XCI format or a Switch 2 execution route.
+With a Windows multi-configuration generator, use `build/Debug/nx2lab.exe`.
+The demo executes two original AArch64 instructions and reports `x0=43`.
+`run-owned` accepts the small project-authored **NX2OWNED** test format.
+These commands exercise the local CPU/memory oracle; external emulator
+experiments have separate source-pinned workflows.
 
-The `demo` command executes **two independently authored generic AArch64 instructions**
-(`MOVZ x0, #42; ADD x0, x0, #1`) and stops before `BRK` is retired; `x0=43`.
-A second source-owned fixture exercises 64-bit STR/LDR with a checked guest-memory region and fault tests.
-A third source-owned NX2OWNED file stops at a generic AArch64 `SVC #0x1234`
-request, preserving its caller state and leaving all service dispatch disabled.
-Unit tests separately prove that an explicit *mock fixture* reply can
-resume this stopped test program, then execute one more instruction. This is
-not an observed Horizon/Switch 2 call ABI, real exception return, or host syscall.
-No external console, firmware, ROM, keys or exploit are needed.
+## Find your way
 
-## Structure
+| Need | Start here |
+| --- | --- |
+| Verified results, limits and research records | [Status](docs/STATUS.md) |
+| Next workload and acceptance criteria | [Plan](docs/PLAN.md) |
+| Build, test and contribute | [Contributing](CONTRIBUTING.md) |
+| How architecture decisions change | [Adaptive strategy](docs/ADAPTIVE_STRATEGY.md) |
+| Authorized device research and evidence handling | [Security](docs/SECURITY.md) · [Research intake](docs/RESEARCH_INTAKE.md) |
 
-- `include/nx2/`, `src/` — bounded, source-owned CPU instruction, guest-memory and owned-image research.
-- `tests/` — positive and negative executable tests.
-- `fixtures/` — source-authored tiny AArch64 words only.
-- `tools/reference/` — source-pinned external-runtime probes, input generators,
-  log assessors and malformed-input checks; external implementations stay outside this tree.
-- `evidence/` — evidence manifests and a strict verifier.
-- `docs/STATUS.md` — live established capabilities versus unknowns.
-- `docs/PLAN.md` — gated research, debugger and emulator priorities.
-- `docs/SOURCES.md` — public evidence, date, confidence, license boundaries.
-- `docs/SECURITY.md` — safe lab policy and scope of controlled experiments.
-- `docs/RESEARCH_INTAKE.md` — evidence classifications for published exploit,
-  homebrew and firmware observations without unauthorized hardware actions.
-- `docs/PUBLISH.md` — publish this local Git repository without discarding history.
+| Location | Contents |
+| --- | --- |
+| [`include/nx2/`](include/nx2/) and [`src/`](src/) | Bounded CPU, memory, owned-image and service-stop oracle |
+| [`tests/`](tests/), [`fixtures/`](fixtures/), [`evidence/`](evidence/) | Original tests, tiny inputs and byte-hashed manifests |
+| [`tools/reference/`](tools/reference/) | External-runtime probes, generators, assessors and source-checked overlays |
+| [`.github/workflows/`](.github/workflows/) | Core CI and separately scoped runtime experiments |
+| [`docs/research/`](docs/research/) | Dated experiments, failures and exact provenance |
 
-## Principles
+## Scope and license
 
-1. Real workload progression over PR/test counts.
-2. Distinguish generic ARM ISA behavior from Switch 2 hardware facts.
-3. Keep **public** evidence and **authorized local** observations separate.
-4. No Nintendo firmware, keys, copyrighted binaries, decrypted games or
-   device-identifying data in Git or public CI.
-5. No blind import of GPL-only emulator code into this MIT-licensed repository.
-   Review license provenance before depending on any external engine.
-6. No false playable-game, kernel-exploit or persistent-CFW claims.
-7. Guest execution uses the ordinary CI runner account, without a console.
-   Build dependencies are installed separately in disposable CI environments.
+Original NX2 code and documentation are [MIT-licensed](LICENSE), unless marked
+otherwise. External GPL implementations stay in separate research builds;
+reusing or distributing them requires their own license review. Console
+firmware, keys, games and identifying device data do not belong in this repo.
 
-## Research direction
-
-**Track R — responsible device research:** external research inventory,
-firmware/host compatibility matrices, reproducible *non-invasive* probes,
-validated log/evidence formats, and analysis of already published observations.
-Do not assume that the public ns2jb proof of concept gives kernel or persistent
-execution. Avoid running unreviewed third-party hardware tools or weakening
-host security solely to chase early demos.
-
-**Track E — emulator foundation:** bounded AArch64 CPU state and memory,
-selected user-mode HLE contracts, independent homebrew programs, Horizon IPC,
-GPU command/shader evidence and ultimately presented guest frames.
-Only make a Switch 2 compatibility claim after measuring the real device ABI
-and independently verifying behavior.
-
-Read `docs/PLAN.md` before expanding the implementation. Contributions are
-welcome via small, independently verifiable patches.
-
-## License
-
-MIT for original nx2-lab code and documentation, unless marked otherwise.
-No affiliation with Nintendo, NVIDIA, or any external jailbreak/emulator team.
+Guest execution uses the ordinary CI runner account, without a console.
+Build dependencies are installed separately in disposable CI environments.
+NX2 is independent of Astraea's PS5 work and is unaffiliated with Nintendo,
+NVIDIA or the external emulator projects.

@@ -4,6 +4,7 @@
 This only validates source identity and metadata. It does NOT establish that
 an observed behaviour matches Nintendo Switch 2 hardware or host containment.
 """
+from datetime import date
 import hashlib
 import json
 from pathlib import Path
@@ -16,6 +17,16 @@ REQUIRED = {"schema", "id", "category", "source_file", "sha256",
 CATEGORIES = {"source_owned", "public_specification", "hardware_local_aggregate"}
 
 
+def unique_object(pairs):
+    """Refuse ambiguous JSON objects instead of silently taking the last key."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate evidence field: " + key)
+        result[key] = value
+    return result
+
+
 def validate(manifest: Path) -> str:
     base = Path(__file__).resolve().parent.parent
     evidence = (base / "evidence").resolve()
@@ -24,14 +35,22 @@ def validate(manifest: Path) -> str:
         raise ValueError("evidence manifest must be inside evidence/")
     if manifest.stat().st_size > MAX_MANIFEST:
         raise ValueError("oversized evidence manifest")
-    data = json.loads(manifest.read_text(encoding="utf-8"))
-    if type(data) is not dict or set(data) != REQUIRED or data["schema"] != 1:
+    data = json.loads(manifest.read_text(encoding="utf-8"),
+                      object_pairs_hook=unique_object)
+    if (type(data) is not dict or set(data) != REQUIRED or
+            type(data["schema"]) is not int or data["schema"] != 1):
         raise ValueError("invalid evidence schema")
-    if data["category"] not in CATEGORIES:
+    if type(data["category"]) is not str or data["category"] not in CATEGORIES:
         raise ValueError("unrecognized evidence category")
     if not all(type(data[k]) is str and 0 < len(data[k]) <= 256
                for k in ("id", "source_file", "sha256", "date_utc")):
         raise ValueError("invalid evidence identity fields")
+    try:
+        canonical_date = date.fromisoformat(data["date_utc"]).isoformat()
+    except ValueError:
+        raise ValueError("date_utc must be a valid YYYY-MM-DD date") from None
+    if canonical_date != data["date_utc"]:
+        raise ValueError("date_utc must be a valid YYYY-MM-DD date")
     if len(data["sha256"]) != 64 or any(c not in "0123456789abcdef"
                                        for c in data["sha256"]):
         raise ValueError("invalid SHA-256 hex")

@@ -2,7 +2,7 @@
 
 **Audit date:** 2026-10-31
 
-**Status:** implementation proposal supported by frozen-source inspection and a bounded local interpreter check. No restored full Catch2 run is claimed.
+**Status:** a source-guarded overlay and strict result checker are implemented; the linked Catch2 gate awaits execution. No restored integrated pass is claimed.
 
 The excluded `native_gpu_characteristics.cpp` translation unit contains **31 cases: 8 about MME and 23 about other native GPU behavior**. Seven cases use a stale interpreter interface. Source review identifies **24 unchanged candidates and 5 compatibility candidates**, giving **29 candidates for restoration**. The remaining **2 cases mix interpreter checks with DMA contracts that changed in the production caller**. Those two require a semantic decision; an API rename is insufficient.
 
@@ -145,9 +145,36 @@ Thus a release, dependency signal, or completion flag alone is insufficient evid
 
 The scheduler checks the presence of the environment variable and caches the result within the instantiated function. The qualification setup should establish the environment before executing the relevant code and record it in the run. This source observation does not retroactively establish the environment used by other translation units or earlier runs.
 
-## Proposed next implementation scope
+## Implemented qualification gate
 
-The next change should reconcile the tests against the exact candidate source in an ephemeral checkout. Keep the GPL implementation and test bodies in that checkout; this MIT repository should contain original tooling, the source identities, and the research/acceptance record.
+The [overlay](../../tools/reference/eden_ns2/overlay_native_gpu_tests.py)
+guards the frozen commit and 18 source blobs. It preserves 24 case bodies,
+adapts the five compatible cases, and retains the two unresolved DMA bodies
+inside named exclusions. The original CMake entry stays enabled. Its output
+test blob is `e88584206d38a09b10cedefe473c6750390288ee`.
+
+The [source-build workflow](../../.github/workflows/p0-eden-ns2-full-build.yml)
+builds the actual linked target and runs it with `EDEN_NATIVE_STRICT=1`.
+The [result checker](../../tools/reference/eden_ns2/assess_native_gpu_tests.py)
+requires matching registration and execution inventories for **29 restored +
+33 existing cases**, including exact names, source files and tags. Nonzero
+exit, missing cases, failures and skips fail the gate. The artifact retains
+the source diff, upstream license, manifest, XML reports and process status.
+Local verification passed 18 overlay checks, including 14 with the frozen
+source, and 26 report-checker regressions; these do not replace the pending
+linked run.
+
+An upstream comparison through
+[`b2cef0c0f2e8517673233e22c929918e2c60e654`](https://github.com/0x2593/Eden-NS2/compare/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c...b2cef0c0f2e8517673233e22c929918e2c60e654)
+found the test, CMake, interpreter and QMD blobs unchanged. New caller-side
+DMA synchronization needs separate review of the two unresolved contracts.
+New service placeholders also return success with a `(STUBBED)` diagnostic;
+any future runtime rebaseline must reject that as successful service evidence.
+The qualification source remains frozen at `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c`.
+
+## Implementation scope and review rationale
+
+The overlay reconciles the tests against the exact candidate source in an ephemeral checkout. The GPL implementation and test bodies stay in that checkout; this MIT repository contains original tooling, the source identities, and the research/acceptance record. Linked execution remains pending.
 
 1. **Guard the input.** Verify the exact upstream commit and the test, interpreter, macro-caller, and CMake blobs before applying a compatibility overlay. Fail on a mismatch or an unexpected number of replacement sites.
 2. **Restore unchanged coverage.** Preserve the 23 non-MME cases and the upload/storage case, including their assertions and strict-mode setup. Replace the current whole-file CMake exclusion with an explicitly documented reconciliation.

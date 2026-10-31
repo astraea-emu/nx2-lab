@@ -1,107 +1,62 @@
-# Research and emulation roadmap — dependency gates, not dates
+# NX2 Lab — active plan
 
-## Project position
+## Objective
 
-Astraea and NX2 Lab are independent. This project should not repeat the
-mistake of accumulating a long list of isolated components without progressing
-one frozen executable. The initial goal is to be useful to developers long
-before a Switch 2 commercial game boots.
+[#21](https://github.com/astraea-emu/nx2-lab/issues/21) compares a mature,
+separately licensed emulator runtime with an upstream contribution path.
+Production adoption remains **HOLD**. Keep the MIT lab focused on independent
+inputs, conformance tools and a small CPU/memory oracle.
 
-## Active gate — strict native-GPU qualification within #21
+The NRO lifecycle and synthetic ExeFS/guest-checked service-manager controls
+have passed within their declared limits. [Status](STATUS.md) records the
+measured results. [Adaptive strategy](ADAPTIVE_STRATEGY.md) defines when the
+architecture decision should change.
 
-The Eden NRO lifecycle control in [#28](https://github.com/astraea-emu/nx2-lab/pull/28)
-and the synthetic extended-ExeFS lifecycle/guest-checked service-manager control
-in [#32](https://github.com/astraea-emu/nx2-lab/pull/32) have passed and merged.
-The [actual combined runtime run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596)
-verified baseline status **0**, invalid-META rejection status **1**, and IPC
-status **0** with all 21 observed guest fields, handle cleanup and real process
-exit. All seven PR #32 checks passed at the tested head. [Live status](STATUS.md)
-records the exact revisions and remaining limits. Production-engine selection
-remains **HOLD**.
+## Now: restore strict native-GPU coverage
 
-The active next #21 slice is strict native-GPU qualification under
-[Adaptive Strategy](ADAPTIVE_STRATEGY.md). The existing test exclusion removes
-31 cases in one native-GPU file: eight concern MME and 23 cover other GPU
-behavior. Source review identifies **29 restoration candidates**: 24 cases
-without the stale interpreter interface and five with bounded compatibility
-adaptations. These are not full-runtime passes. Two DMA cases require an
-explicit contract decision because their ownership and size policy changed;
-preserve those unresolved expectations instead of weakening them to obtain
-green CI.
+The last verified integrated run excluded one 31-case file because some MME
+tests use an obsolete interpreter API. The implemented overlay prepares 29
+candidates, with linked execution pending. The
+[reconciliation audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
+identifies **29 restoration candidates**: 24 unchanged cases and five bounded
+test adaptations. Two other cases require decisions about DMA read ownership,
+failure propagation and the changed size policy. None of these 31 cases is
+qualified by the existing reduced-suite pass.
 
-Restore the declared scope with exact-source guards and preserved assertions.
-Execute the actual linked target with `EDEN_NATIVE_STRICT=1`, record the case
-inventory and first actual failure, and keep any remaining exclusions explicit.
-A source review or temporary interpreter probe does not qualify the integrated
-target. The [31-case reconciliation audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
-defines the exact source and adaptation boundaries for this implementation.
+Acceptance for this slice:
 
-This order follows the frozen runtime's behavior: its
-[QMD scheduler](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/video_core/native_qmd.h)
-can otherwise skip unsupported shader work and still report completion.
-Choose the next guest graphics/display workload from the measured results and
-require actual image readback before claiming a frame. The observed NRO
-crypto assertion and original loader bounds remain supporting robustness
-repairs and production blockers; no evidence currently puts that crypto
-failure on the controlled ExeFS path. Device ABI fidelity requires independent
-hardware observations or authoritative public ABI evidence.
+1. Verify the frozen commit and exact test, interpreter, caller and CMake blobs
+   before applying the declared overlay in the separate GPL checkout.
+2. Preserve the 24 unchanged cases and the original inputs/assertions in the
+   five compatible cases. Keep both unresolved DMA expectations identifiable.
+3. Build and run the actual linked Catch2 target with `EDEN_NATIVE_STRICT=1`.
+   Record the registered and executed cases, applied diff, exit status and
+   original output. Report omissions and failures explicitly.
+4. Reconcile the measured inventory against **29 candidates + 2 unresolved**.
+   Diagnose any new failure before changing the scope or expected behavior.
+5. Record an ACCEPT/HOLD/REJECT decision for this slice and the next executable
+   workload. A passing reduced scope does not qualify the complete suite.
 
-The E-lane below is the long-term dependency map. It does not authorize
-rebuilding an entire CPU/HLE/GPU stack independently of the qualified-engine
-comparison. HBX stage 2 remains a bounded secondary regression.
+## After this result: select one graphics workload
 
-## R-lane: console security research (opt-in and controlled)
+Choose one source-authored guest graphics/display path using the measured GPU
+results. Require actual guest-produced image readback against an independent
+reference. The frozen QMD scheduler can report completion after skipped shader
+work outside strict mode, so semaphore completion alone cannot prove a frame.
+The [audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md#qmd-strict-mode-is-part-of-the-tested-contract)
+records the exact source behavior and remaining interpreter/JIT boundary.
 
-- **R0 — provenance and threat model:** inventory original research sources,
-  distinguish firmware-specific results from rumors; audit tool licenses,
-  host privileges and device effects. No device changes required.
-- **R1 — safe observation protocol:** fixed JSON schema for authorized local
-  measurements, source hashes, firmware and environment; avoid publishing
-  identifying material or private binary captures.
-- **R2 — userland/homebrew evidence:** independently authored, minimal
-  non-destructive device probes only after obtaining informed hardware consent
-  and reviewing risks. No third-party kernel extension or SIP change by default.
-- **R3 — disclosure and repeatability:** report bounded failures and negative
-  tests to upstream researchers; protect discoveries appropriately.
+## Supporting work and boundaries
 
-## E-lane: emulator foundation
+The malformed-NRO AES assertion and original parser bounds remain production
+blockers. Qualify any repair against the original C++ with negative and
+sanitizer-backed regressions. No evidence places that crypto failure on the
+controlled ExeFS path, so it does not replace the selected GPU slice.
 
-- **E0 — deterministic owned ARM64:** a tiny source-authored interpreter,
-  explicit guest-memory permissions, typed stops and negative tests (implemented
-  generic proof; NOT a Switch 2 emulator). Keep this small as a semantic oracle.
-- **E1 — qualified CPU backend:** evaluate a maintained ARMv8/AArch64 JIT for
-  correct guest memory, interrupts, faults and portability; use independent
-  tests and ensure license compatibility. Preserve E0 as a tiny oracle.
-- **E2 — source-owned process/IPC:** strict owned test-image parsing and
-  checked guest memory are implemented as generic exercises; the source-owned SVC instruction now stops before retirement; a **mock-only**
-  continuation contract checks the immutable word/immediate, supplies an
-  explicitly selected fixture return, and advances to the next instruction.
-  Independent external homebrew has since been exercised through separate
-  NeXo/Eden research builds; never substitute these mock semantics for Horizon. The
-  NX2OWNED envelope is NOT a Nintendo executable format.
-- **E3 — homebrew runtime:** only observed Horizon semantics/IPC, real homebrew
-  memory/events/filesystem/input, scoped to an exact source revision.
-- **E4 — graphics:** validated GPU command and shader evidence -> typed IR ->
-  SPIR-V/Vulkan; source-owned deterministic readback before presentation.
-- **E5 — guest-produced frame:** owned homebrew executes CPU, dispatches
-  necessary services and generates a presentable image. No host-drawn oracle.
-- **E6 — commercial C0/C1:** lawfully accessible, authorized local executable
-  read-only profile; first instruction only after verified ABI, source
-  provenance and containment. Game/render claims are separate evidence gates.
-
-## Earlier portfolio time allocation proposal
-
-For the next focused sprint, NX2 Lab 70%, Astraea 20%, ecosystem contribution/
-communication 10%, with an explicit re-evaluation when an objective milestone
-is reached. Never interpret this allocation as forecast delivery dates.
-
-## Every PR must answer
-
-1. Which exact observed stop is being removed?
-2. What source evidence justifies the behavior?
-3. What positive and negative tests prove it?
-4. Does a real source-owned workload advance further?
-5. What still remains unsupported?
-
-No gameplay or persistent jailbreak promotion without a reproducible artifact
-and independent evidence. Screenshots alone do not count.
+HBX stage 2 ([#20](https://github.com/astraea-emu/nx2-lab/issues/20)) remains a
+bounded secondary regression. Device research follows the separate
+[research intake](RESEARCH_INTAKE.md) and [security scope](SECURITY.md).
+Hardware ABI fidelity, host-platform parity, safe redistribution and commercial
+game support require their own evidence; this plan makes no delivery promise
+for them. Earlier schedules and allocation proposals are preserved in the
+[dated strategy records](STRATEGY_2026-10-29.md).

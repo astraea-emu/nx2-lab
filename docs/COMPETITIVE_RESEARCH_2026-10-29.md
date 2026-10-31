@@ -1,5 +1,7 @@
 # NX2 Lab / Astraea — public research and competitive checkpoints
 
+> **Historical snapshot.** Repository metadata and proposed next steps below are from October 29. See [current status](STATUS.md) and [the active plan](PLAN.md) for subsequent work.
+
 **Snapshot:** 2026-10-29. Public source metadata and project claims are leads;
 not independent local compatibility benchmark results. Preserve distinctions
 between official releases, repository main, source-owned homebrew, actual
