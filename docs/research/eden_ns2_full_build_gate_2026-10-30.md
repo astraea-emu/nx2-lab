@@ -28,6 +28,15 @@ The next run **first builds the real `core` and `video_core` targets without sup
 
 If the reduced suite passes, the evidence proves the original integrated libraries build on this toolchain (with one cast patch) and **only the included** native tests pass. The 31 native-GPU cases in the excluded translation unit remain unqualified and block production-engine ACCEPT; the MME API mismatch must be reconciled so that the complete file can run, not kept as an indefinite exclusion. If further source/test mismatches arise, preserve the failure and review maintenance costs rather than repeatedly excluding more files.
 
+## Verified reduced-suite result
+
+[Run 41115025130](https://github.com/astraea-emu/nx2-lab/actions/runs/41115025130)
+built the actual core and GPU libraries with the declared cast correction,
+linked the reduced test target, and passed **33 cases / 9,103 assertions**.
+[PR #27](https://github.com/astraea-emu/nx2-lab/pull/27) merged with that bounded
+result. The excluded translation unit remains outside this pass; the result
+does not repair the full-suite build failure or qualify its omitted cases.
+
 ## Coverage clarification — October 31
 
 The exclusion is **one complete test translation unit**, not 31 MME-only cases.
@@ -62,6 +71,8 @@ in other test translation units.
 
 Even if successful, it proves only buildable source and test-defined native behavior, **not** a lawfully accessed Switch 2 commercial guest, actual Nintendo ABI parity, first guest-produced pixel, macOS support or game compatibility.
 
-## Next prerequisite
+## Current continuation — October 31
 
-A genuine application must execute through that frozen loader/CPU/HLE runtime with a controlled host input and a verified first unsupported guest interface. Reusable native GPU tests can become cross-engine checks after that. Main engine decision stays **HOLD**.
+The separate guest-execution prerequisites have since passed: [PR #28](https://github.com/astraea-emu/nx2-lab/pull/28) qualifies the labeled NRO lifecycle control, and [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) qualifies synthetic native-classified ExeFS lifecycle and an actual guest-checked service-manager roundtrip. Their [live status](../STATUS.md) preserves the precise input changes and limits.
+
+The active next slice returns to the omitted file. The [31-case reconciliation audit](eden_native_gpu_test_reconciliation_2026-10-31.md) identifies 24 unchanged candidates, five bounded compatibility adaptations, and two DMA contracts requiring explicit review. Restore and execute the declared scope under strict mode with preserved assertions; source review does not count as an integrated test pass. Main engine decision stays **HOLD**, and no guest-produced frame or hardware ABI parity is established.

@@ -19,6 +19,9 @@ NSO_MAGIC = b"NSO0"
 NPDM_SIZE = 0x600
 MESSAGE = b"NX2 original extended ExeFS guest reached debug SVC\n"
 TITLE_ID = 0x0100123456780000
+MAIN_THREAD_PRIORITY = 0x2C
+MAIN_THREAD_CORE = 0
+THREAD_INFO_CAPABILITY = 0x030043F7  # priorities 16..63, cores 0..3
 
 
 def words(*values: int) -> bytes:
@@ -75,6 +78,8 @@ def build_extended_npdm() -> bytes:
     out = bytearray(NPDM_SIZE)
     out[0:4] = b"META"
     out[0xC] = 7  # 64-bit ISA, 39-bit address space
+    out[0xE] = MAIN_THREAD_PRIORITY
+    out[0xF] = MAIN_THREAD_CORE
     struct.pack_into("<I", out, 0x1C, 0x100000)  # main stack
     struct.pack_into("<IIII", out, 0x70, 0x500, 0x100, 0x80, 0x380)
     out[0x380:0x384] = b"ACID"
@@ -85,7 +90,7 @@ def build_extended_npdm() -> bytes:
     struct.pack_into("<II", out, 0x520, 0x40, 0x1C)
     struct.pack_into("<II", out, 0x530, 0x80, 4)
     struct.pack_into("<Q", out, 0x544, 0x5678)
-    struct.pack_into("<I", out, 0x580, 0x030043F7)
+    struct.pack_into("<I", out, 0x580, THREAD_INFO_CAPABILITY)
     return bytes(out)
 
 
@@ -116,6 +121,24 @@ def verify_self_authored_fixture(nso: bytes, npdm: bytes) -> None:
         raise ValueError("missing ACI0")
     if struct.unpack_from("<Q", npdm, 0x510)[0] != TITLE_ID:
         raise ValueError("wrong synthetic title ID")
+    if struct.unpack_from("<II", npdm, 0x70) != (0x500, 0x100):
+        raise ValueError("unexpected ACI0 capability container")
+    if struct.unpack_from("<II", npdm, 0x530) != (0x80, 4):
+        raise ValueError("unexpected thread capability location or size")
+    capability = struct.unpack_from("<I", npdm, 0x580)[0]
+    if capability & 0xF != 0x7:
+        raise ValueError("not a core/priority capability")
+    # These field widths follow the frozen kernel's CorePriority descriptor.
+    # A header priority of zero passes the metadata parser but violates the
+    # actual KThread initializer's process priority-mask assertion.
+    lowest_priority = (capability >> 4) & 0x3F
+    highest_priority = (capability >> 10) & 0x3F
+    minimum_core = (capability >> 16) & 0xFF
+    maximum_core = (capability >> 24) & 0xFF
+    if not 4 <= highest_priority <= npdm[0xE] <= lowest_priority:
+        raise ValueError("main thread priority is outside the user capability mask")
+    if not minimum_core <= npdm[0xF] <= maximum_core < 64:
+        raise ValueError("main thread core is outside the virtual-core capability mask")
 
 
 def main() -> int:

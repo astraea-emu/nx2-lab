@@ -2,17 +2,17 @@
 
 **Independent, clean-room Nintendo Switch 2 security research and emulation foundations.**
 
-> **Status (2026-10-31): emulator-runtime qualification in progress.**
-> NX2 has independently exercised source-authored Switch 1-format homebrew in
-> external runtimes, built Eden-NS2's CPU/HLE/GPU libraries, and reproduced and
-> verified an isolated repair for a native-metadata classification bug.
-> Its synthetic extended-ExeFS guest has now emitted debug output and exited
-> cleanly in the patched Eden runtime, with a terminating malformed-NPDM control.
-> The original ARM64 service-manager IPC extension is awaiting its real runtime
-> result; the corrected combined acceptance is still pending. See [measured
-> results and pending gates](docs/STATUS.md). Production-engine selection remains
-> HOLD. No hardware-backed Switch 2 ABI, guest-produced frame, commercial game
-> support, or exploit is established.
+> **Status (2026-10-31): synthetic native-classified guest lifecycle and IPC verified.**
+> NX2's original extended-ExeFS ARM64 guest completed a real service-manager
+> roundtrip in the source-built, patched Eden runtime, checked the returned
+> values in its own memory, closed its handles and exited naturally. The
+> separate debug/exit guest and invalid-META rejection controls also passed;
+> [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) merged after all seven
+> checks passed. The next primary slice is strict native-GPU qualification.
+> See [measured results and the next gate](docs/STATUS.md). Production-engine
+> selection remains HOLD. This is Linux host evidence for a synthetic process,
+> not hardware-backed Switch 2 ABI, a guest-produced frame, commercial game
+> support, or an exploit.
 
 ## Current direction — one evidence-driven gate
 

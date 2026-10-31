@@ -20,10 +20,11 @@ remain in this MIT repository.
 | --- | --- | --- |
 | NeXo Switch 1-format NRO | Unchanged source-authored homebrew executed through the real loader/CPU/HLE path, completed calculations and exited; malformed images rejected. | [Merged #25](https://github.com/astraea-emu/nx2-lab/pull/25), [runtime CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41092724871) |
 | Eden-NS2 native-facing source contracts | 94 assertions passed in both GNU C++ and Clang with ASan/UBSan against exact original service/GPU header implementations. | [Merged #26](https://github.com/astraea-emu/nx2-lab/pull/26), [contract CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41094596650) |
-| Integrated Eden-NS2 build | CPU/HLE/GPU libraries built with one isolated cast correction; the reduced original suite passed 33 cases / 9,103 assertions. **31 cases in one native-GPU test file remain unbuilt and untested: eight MME cases and 23 other GPU cases.** | [Merged #27](https://github.com/astraea-emu/nx2-lab/pull/27), [build CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41115025130) |
+| Integrated Eden-NS2 build | CPU/HLE/GPU libraries built with one isolated cast correction; the reduced original suite passed 33 cases / 9,103 assertions. **31 cases in one excluded native-GPU test file remain unqualified in the integrated test target: eight MME cases and 23 other GPU cases.** | [Merged #27](https://github.com/astraea-emu/nx2-lab/pull/27), [build CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41115025130) |
 | NRO fixture preflight | Authentic source-owned NRO accepted and six malformed versions rejected before submission to the research runtime. This does not repair or prove safety of Eden's own loader. | [Merged #29](https://github.com/astraea-emu/nx2-lab/pull/29), [preflight CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41127444547) |
 | Native metadata reload defect | Actual frozen C++ retained `IsSwitch2()` after extended-to-legacy metadata reuse; the baseline failed as expected and a one-line isolated reset passed the regression. | [Merged #30](https://github.com/astraea-emu/nx2-lab/pull/30), [original-source CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41136582253) |
 | Original extended-ExeFS input | Deterministic NX2-authored ARM64 NSO0 plus synthetic extended-ACID NPDM generated without a console SDK or proprietary data. Fixture generation alone proves no execution. | [Merged #31](https://github.com/astraea-emu/nx2-lab/pull/31), [fixture CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41132733015) |
+| Synthetic extended-ExeFS lifecycle and SM IPC | Actual guest debug/exit and guest-checked service-manager roundtrip returned **0**; invalid META produced the expected typed rejection and status **1**. No assertion, execution fault or stub diagnostic appeared in these three logs. | [Merged #32](https://github.com/astraea-emu/nx2-lab/pull/32), [runtime CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
 
 Frozen runtime sources: Eden-NS2
 `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c`; NeXo
@@ -31,7 +32,7 @@ Frozen runtime sources: Eden-NS2
 `hello.nro` Git blob is `bb0ee2a52acd303e7c800443163aa91900eabb58`.
 All results above are host-side measurements, not physical Switch 2 observations.
 
-## Active execution controls
+## Verified execution controls
 
 ### Eden NRO lifecycle — merged PR #28
 
@@ -59,7 +60,47 @@ rejection, status 1 and no guest output; its incidental crypto-probe assertion
 remains explicitly reported. This closes the bounded NRO lifecycle control,
 not production loader safety or the original NRO's return limitation.
 
-### Synthetic extended-ExeFS execution — PR #32
+### Synthetic extended-ExeFS lifecycle and SM IPC — merged PR #32
+
+[Runtime run #41233784596](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596),
+job `124633185031`, passed all three actual emulator trials at head
+[`6adfaada80f9afdea3175629d8f5d144d5c6cd34`](https://github.com/astraea-emu/nx2-lab/commit/6adfaada80f9afdea3175629d8f5d144d5c6cd34).
+All seven checks for that head passed. [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32)
+merged as
+[`2d9bb0064f4d53b255805fffcb28839977e374c4`](https://github.com/astraea-emu/nx2-lab/commit/2d9bb0064f4d53b255805fffcb28839977e374c4).
+
+| Actual runtime control | Observed result |
+| --- | --- |
+| Original debug/exit ExeFS guest | Ordered source-tagged 12 GiB classification, guest debug output and genuine `ExitProcess`; status **0**; no execution assertion/fault |
+| Corrupted META | Core error **4**, Frontend **0007-0004**, numeric description **4**; status **1**; no assertion or guest execution |
+| Original service-manager IPC guest | All **21 observed fields** validated from guest memory, completion marker followed by genuine `ExitProcess`; status **0**; no execution assertion/fault or unexpected stub |
+
+The IPC guest connected to `sm:` and observed handle `0x000103fe`, initialized
+that session, and acquired `set` as a distinct moved handle `0x000183fd`.
+Initialize and GetService both returned transport result **0** and service
+result **0**. Its structurally valid empty-name request returned transport
+result **0**, service error **`0x00000c15`**, and no handles. Both CloseHandle
+calls returned **0** and `fail_step` remained **0**. These are values read,
+checked and printed by the actual ARM64 guest, not host-supplied success text.
+The negative request establishes semantic name rejection; it does not qualify
+arbitrary malformed HIPC descriptors.
+
+The three-log artifact was independently downloaded and inspected: SHA-256
+`fcc0fc5db1087e9816f00690db37c25f71cb4148b64fd4a6f653f33bdbc70b60`.
+No assertion, execution fault or `STUB` diagnostic was found in those logs.
+**112 combined local Python tests and 13 core CTest groups also passed**;
+the independently completed emulator workflow supplies the runtime evidence.
+See the [native lifecycle record](research/eden_native_exefs_runtime_2026-10-31.md)
+and [guest IPC record](research/eden_native_ipc_runtime_2026-10-31.md) for the
+frozen inputs, request layouts, source references and acceptance details.
+
+This closes the bounded native-classified lifecycle/SM control on Linux. It
+qualifies shared Horizon-style IPC in a synthetic extended-NPDM process; it
+is not a physical Switch 2 ABI observation, graphics result, game run, macOS
+runtime qualification or production-engine adoption. The source runtime uses
+the explicitly recorded isolated build/lifecycle repairs.
+
+#### Earlier native trials — preserved failure evidence
 
 [First runtime run #41224123601](https://github.com/astraea-emu/nx2-lab/actions/runs/41224123601)
 selected Eden's **12 GiB / Switch 2-classified** memory layout and recorded the
@@ -82,39 +123,21 @@ at head `6c55524` then produced these actual runtime results:
 The workflow nevertheless **failed** because its old log assessor expected an
 English NPDM error description; the frozen runtime emitted the numeric form.
 That is a checker failure after the observed workload results, not a green
-runtime workflow. The corrected assessor requires the complete source-tagged
+runtime workflow. The corrected assessor then required the complete source-tagged
 error tuple and exactly one ordered classification/output/exit sequence for the
-positive input. It passes the actual archived logs and **26 assessor regression
-tests**. Archive replay does not replace a fresh run of the revised workflow.
+positive input. Archive replay and **26 assessor regression tests** passed
+before the independent successful runtime run above. The earlier failed
+workflow remains recorded as a failure of its own revision.
 
-Current PR head
-[`6adfaada80f9afdea3175629d8f5d144d5c6cd34`](https://github.com/astraea-emu/nx2-lab/commit/6adfaada80f9afdea3175629d8f5d144d5c6cd34)
-includes that correction, current main, and the original service-manager IPC
-guest. It also saves the compiler cache before runtime trials so that a trial
-failure does not discard the expensive build cache. **112 combined Python tests
-passed locally**; those fixture/checker tests are not real emulator execution.
-The actual combined runtime trial is **PENDING** in
-[run #41233784596](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596).
-Do not claim IPC success or complete PR acceptance from the baseline result,
-archive replay or unit tests.
+## Active next milestone — strict native-GPU qualification
 
-## Next milestone and decision
+The NRO lifecycle, synthetic extended-ExeFS and guest-checked SM controls have
+completed. Under [#21](https://github.com/astraea-emu/nx2-lab/issues/21), the next
+primary slice is **strict native-GPU qualification** before selecting a guest
+frame workload. Production-engine selection remains **HOLD** under
+[Adaptive Strategy](ADAPTIVE_STRATEGY.md).
 
-Complete the native controls under #21, then record the evidence-based decision
-using [Adaptive Strategy](ADAPTIVE_STRATEGY.md). A successful synthetic
-extended-ExeFS run qualifies only Eden's modeled native-facing loader/CPU path;
-it does not warrant production-engine ACCEPT by itself.
-
-An original ARM64 extension of the **same source-owned ExeFS** is now under
-real service-manager trial in run #41233784596. It initializes `sm:`, obtains a
-`set` service handle, checks the empty-name error, closes both handles, and
-reports fields read from its own reply memory. **Actual IPC success remains
-pending.** The negative service request is structurally valid with an invalid
-name, not malformed HIPC data.
-
-If that runtime gate passes, the next primary slice is **strict native-GPU
-qualification**, before selecting a guest frame workload. Restore the excluded
-native-GPU test translation unit with exact-source guards and preserved
+Restore the excluded native-GPU test translation unit with exact-source guards and preserved
 assertions. Source review identifies 24 cases that do not use the stale
 interpreter interface and five cases with bounded compatibility adaptations.
 Those 29 cases are restoration candidates, not full-runtime passes. Two DMA

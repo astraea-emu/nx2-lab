@@ -7,28 +7,34 @@ mistake of accumulating a long list of isolated components without progressing
 one frozen executable. The initial goal is to be useful to developers long
 before a Switch 2 commercial game boots.
 
-## Active gate — runtime qualification (#21)
+## Active gate — strict native-GPU qualification within #21
 
-The real Eden NRO lifecycle control in [#28](https://github.com/astraea-emu/nx2-lab/pull/28)
-has passed and merged. The current engineering sequence finishes synthetic
-extended-ExeFS execution and an actual guest-checked service-manager roundtrip
-in [#32](https://github.com/astraea-emu/nx2-lab/pull/32), with natural positive
-exit, no positive execution faults/assertions, and explicit terminating
-invalid-input rejection. The NRO negative control's observed AES-probe
-assertion remains a separate loader-robustness blocker; exit status 1 does not
-prove assertion-free parsing. [Live status](STATUS.md) separates already
-measured behavior from pending fixes. Production-engine selection remains HOLD.
+The Eden NRO lifecycle control in [#28](https://github.com/astraea-emu/nx2-lab/pull/28)
+and the synthetic extended-ExeFS lifecycle/guest-checked service-manager control
+in [#32](https://github.com/astraea-emu/nx2-lab/pull/32) have passed and merged.
+The [actual combined runtime run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596)
+verified baseline status **0**, invalid-META rejection status **1**, and IPC
+status **0** with all 21 observed guest fields, handle cleanup and real process
+exit. All seven PR #32 checks passed at the tested head. [Live status](STATUS.md)
+records the exact revisions and remaining limits. Production-engine selection
+remains **HOLD**.
 
-After those controls pass, the next #21 slice is strict native-GPU
-qualification under [Adaptive Strategy](ADAPTIVE_STRATEGY.md). The current
-test exclusion removes 31 cases in one file, including 23 non-MME cases.
-Source review identifies 29 cases that can be restored unchanged or with
-bounded test-interface adaptations; two DMA cases need explicit semantic
-review. Execute the restored cases with `EDEN_NATIVE_STRICT=1`, preserve their
-assertions, and record the first actual failure. A source review or temporary
-interpreter unit probe does not count as a full runtime test pass.
-The [31-case reconciliation audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
-defines the exact source and adaptation boundaries for that next implementation.
+The active next #21 slice is strict native-GPU qualification under
+[Adaptive Strategy](ADAPTIVE_STRATEGY.md). The existing test exclusion removes
+31 cases in one native-GPU file: eight concern MME and 23 cover other GPU
+behavior. Source review identifies **29 restoration candidates**: 24 cases
+without the stale interpreter interface and five with bounded compatibility
+adaptations. These are not full-runtime passes. Two DMA cases require an
+explicit contract decision because their ownership and size policy changed;
+preserve those unresolved expectations instead of weakening them to obtain
+green CI.
+
+Restore the declared scope with exact-source guards and preserved assertions.
+Execute the actual linked target with `EDEN_NATIVE_STRICT=1`, record the case
+inventory and first actual failure, and keep any remaining exclusions explicit.
+A source review or temporary interpreter probe does not qualify the integrated
+target. The [31-case reconciliation audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
+defines the exact source and adaptation boundaries for this implementation.
 
 This order follows the frozen runtime's behavior: its
 [QMD scheduler](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/video_core/native_qmd.h)
