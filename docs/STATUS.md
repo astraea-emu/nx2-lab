@@ -4,15 +4,28 @@
 
 The active milestone is [#21: qualify a mature runtime or an upstream
 contribution path](https://github.com/astraea-emu/nx2-lab/issues/21).
-The active qualification gate is [strict native-GPU coverage](PLAN.md).
+The next guest workload is [native VI2 client lifecycle](PLAN.md).
 NX2's own `nx2lab` executable remains a small correctness oracle; measured
 external-runtime behavior belongs to the separately built engine.
 
-## Latest verified workload
+## Latest qualification
+
+[PR #34](https://github.com/astraea-emu/nx2-lab/pull/34)'s
+[strict native run 41245699243](https://github.com/astraea-emu/nx2-lab/actions/runs/41245699243)
+passed at [`3936bc66f7b353ab053e5c12666cf1f37110fe80`](https://github.com/astraea-emu/nx2-lab/commit/3936bc66f7b353ab053e5c12666cf1f37110fe80):
+**62 cases / 25,395 assertions**, process status **0**, with zero failures or
+skips and `EDEN_NATIVE_STRICT=1`. The actual registered and executed inventories
+match **29 restored + 33 existing cases**. The 29 comprise 24 unchanged bodies
+and five compatibility adaptations; **two DMA cases remain excluded and
+unqualified**. The [record](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
+preserves exact source guards, raw reports and the verified artifact digest.
+This accepts the declared native unit-test slice. It does not establish
+guest pixels, the full upstream suite or production-engine suitability.
+
+## Latest guest workload
 
 [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) merged after all seven
-checks passed at [`6adfaada80f9afdea3175629d8f5d144d5c6cd34`](https://github.com/astraea-emu/nx2-lab/commit/6adfaada80f9afdea3175629d8f5d144d5c6cd34);
-the merge is [`2d9bb0064f4d53b255805fffcb28839977e374c4`](https://github.com/astraea-emu/nx2-lab/commit/2d9bb0064f4d53b255805fffcb28839977e374c4).
+checks passed at [`6adfaada80f9afdea3175629d8f5d144d5c6cd34`](https://github.com/astraea-emu/nx2-lab/commit/6adfaada80f9afdea3175629d8f5d144d5c6cd34).
 [Runtime run 41233784596](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596)
 executed three independent inputs in the patched frozen Eden build:
 
@@ -26,10 +39,8 @@ No assertion, execution fault or unexpected stub appeared in those three logs.
 The [IPC record](research/eden_native_ipc_runtime_2026-10-31.md) preserves all
 observed values, source and input hashes, the raw artifact digest and limits.
 The [lifecycle record](research/eden_native_exefs_runtime_2026-10-31.md)
-preserves the earlier priority failure, timeout/rejection failures and the
-later numeric-diagnostic checker failure. Those runs remain failed historical
-experiments. The same revision also passed **112 local Python tests and 13
-core CTest groups**; these are supporting checks, separate from runtime proof.
+preserves the earlier priority, timeout/rejection and diagnostic-checker
+failures. Those runs remain failed historical experiments.
 
 This establishes shared Horizon-style IPC in a synthetic extended-NPDM process
 on Linux. It does not establish a physical Switch 2 ABI or a graphics result.
@@ -44,7 +55,7 @@ failures and acceptance criteria. Their historical next steps do not override
 | --- | --- | --- |
 | NeXo original NRO | Unchanged Switch 1-format homebrew executed its calculations and exited; malformed images rejected. | [#25](https://github.com/astraea-emu/nx2-lab/pull/25) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41092724871) |
 | Eden source contracts | 94 assertions in GNU C++ and Clang ASan/UBSan against original native-facing headers; source-model evidence. | [Record](research/runtime_baseline_eden_ns2_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41094596650) |
-| Integrated Eden libraries | Reduced original suite: **33 cases / 9,103 assertions**. One excluded native-GPU file contains **31 cases: 8 MME and 23 other**. | [Record](research/eden_ns2_full_build_gate_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41115025130) |
+| Earlier integrated baseline | Original reduced suite: **33 cases / 9,103 assertions**, with one 31-case native-GPU file excluded. The later 62-case result is recorded above. | [Record](research/eden_ns2_full_build_gate_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41115025130) |
 | Eden NRO lifecycle | Original input executes but faults on return and times out (**124**); labeled four-byte exit-thunk variant plus lifecycle repair exits (**0**); malformed magic is rejected (**1**) **with an AES-probe assertion**. | [Record](research/eden_nro_guest_probe_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626) |
 | NRO fixture preflight | Authentic input accepted and six mutations rejected before runtime admission; Eden's own parser remains unfixed. | [Record](research/eden_nro_input_preflight_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41127444547) |
 | NPDM reuse | Actual original C++ retains stale `IsSwitch2()` state; the reproduced failure passes after an isolated one-line reset. | [Record](research/eden_ns2_npdm_reload_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41136582253) |
@@ -60,10 +71,10 @@ GPL implementation source stays outside this MIT repository.
 
 ## What remains open
 
-- **Native GPU:** the [31-case audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
-  identifies **29 restoration candidates**, comprising 24 unchanged cases and
-  five compatibility adaptations. **Two DMA contracts remain unresolved.**
-  These counts are source-review findings, not integrated test passes.
+- **Native GPU and display:** two DMA contracts, production macro/JIT paths,
+  the complete upstream suite and actual guest-produced pixels
+  remain unqualified. The [next workload](PLAN.md) exercises stateful VI2
+  registration and notification delivery before a separately captured image.
 - **Loader robustness:** malformed NRO identification asserts in
   `core/crypto/aes_util.cpp:97` (`EVP_CipherInit_ex2`). Terminating rejection is
   not assertion-free parsing. Original loader bounds also need a verified fix

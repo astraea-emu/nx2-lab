@@ -7,51 +7,61 @@ separately licensed emulator runtime with an upstream contribution path.
 Production adoption remains **HOLD**. Keep the MIT lab focused on independent
 inputs, conformance tools and a small CPU/memory oracle.
 
-The NRO lifecycle and synthetic ExeFS/guest-checked service-manager controls
-have passed within their declared limits. [Status](STATUS.md) records the
-measured results. [Adaptive strategy](ADAPTIVE_STRATEGY.md) defines when the
+The NRO lifecycle, synthetic ExeFS/service-manager controls and strict native
+unit-test slice have passed within their declared limits. [Status](STATUS.md)
+records the measured results. [Adaptive strategy](ADAPTIVE_STRATEGY.md) defines when the
 architecture decision should change.
 
-## Now: restore strict native-GPU coverage
+## Accepted baseline
 
-The last verified integrated run excluded one 31-case file because some MME
-tests use an obsolete interpreter API. The implemented overlay prepares 29
-candidates, with linked execution pending. The
-[reconciliation audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
-identifies **29 restoration candidates**: 24 unchanged cases and five bounded
-test adaptations. Two other cases require decisions about DMA read ownership,
-failure propagation and the changed size policy. None of these 31 cases is
-qualified by the existing reduced-suite pass.
+[Run 41245699243](https://github.com/astraea-emu/nx2-lab/actions/runs/41245699243)
+passed **62 cases / 25,395 assertions** with `EDEN_NATIVE_STRICT=1`: 29 restored
+cases plus the existing 33, with no failures or skips. The
+[reconciliation record](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
+preserves the 24 unchanged bodies, five compatibility adaptations and two
+unresolved DMA cases. This accepts the declared unit-test slice; production
+adoption and the full upstream suite remain unqualified.
 
-Acceptance for this slice:
+## Now: native VI2 client lifecycle
 
-1. Verify the frozen commit and exact test, interpreter, caller and CMake blobs
-   before applying the declared overlay in the separate GPL checkout.
-2. Preserve the 24 unchanged cases and the original inputs/assertions in the
-   five compatible cases. Keep both unresolved DMA expectations identifiable.
-3. Build and run the actual linked Catch2 target with `EDEN_NATIVE_STRICT=1`.
-   Record the registered and executed cases, applied diff, exit status and
-   original output. Report omissions and failures explicitly.
-4. Reconcile the measured inventory against **29 candidates + 2 unresolved**.
-   Diagnose any new failure before changing the scope or expected behavior.
-5. Record an ACCEPT/HOLD/REJECT decision for this slice and the next executable
-   workload. A passing reduced scope does not qualify the complete suite.
+Run a separate original ARM64 guest through
+`appletOE` → `GraphicsSupervisor` → `VI2`, using the frozen
+[graphics-supervisor implementation](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/service/am/service/graphics_supervisor.cpp).
 
-## After this result: select one graphics workload
+1. Acquire real service handles and complete the required bootstrap. Check
+   the distinct CMIF/TIPC reply layouts: TIPC carries a raw result without
+   an `SFCO` header.
+2. Register a nonzero client token with notification slots 2/3. Require
+   registration success, duplicate-registration refusal, successful
+   unregister, and missing-token refusal on a repeated unregister.
+3. Submit a valid writable **127-byte** notification buffer and require
+   size rejection without consuming the pending notification. A **128-byte**
+   read must then return retirement bit 2 (`0x4`); a second 128-byte read
+   must return cleared notifications.
+4. The actual guest checks and reports returned values and reply memory,
+   closes all acquired handles, and reaches real `ExitProcess` with status 0.
+   Faults, timeouts and unexpected stub/fallback paths fail acceptance.
 
-Choose one source-authored guest graphics/display path using the measured GPU
-results. Require actual guest-produced image readback against an independent
-reference. The frozen QMD scheduler can report completion after skipped shader
-work outside strict mode, so semaphore completion alone cannot prove a frame.
-The [audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md#qmd-strict-mode-is-part-of-the-tested-contract)
-records the exact source behavior and remaining interpreter/JIT boundary.
+Record the known source-tagged `(STUBBED)` diagnostic from
+[`GetManagerDisplayService`](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/service/vi/application_display_service.cpp)
+explicitly: this getter constructs an actual container-backed manager, but
+obtaining it does not qualify the display implementation. This narrow known
+diagnostic does not permit unrelated fallback success.
+
+Passing this control would establish source-model service behavior, with no
+pixel claim. The following image workload is a CPU-filled checkerboard in the
+supported block layout, presented through the real renderer and captured for comparison
+with an independent pixel reference. Completion signals alone cannot prove a
+frame or hardware ABI fidelity.
 
 ## Supporting work and boundaries
 
+The two DMA contracts still need decisions about read ownership, failure
+propagation and the changed size policy; retain their explicit exclusions.
 The malformed-NRO AES assertion and original parser bounds remain production
 blockers. Qualify any repair against the original C++ with negative and
 sanitizer-backed regressions. No evidence places that crypto failure on the
-controlled ExeFS path, so it does not replace the selected GPU slice.
+controlled ExeFS path, so it does not replace the selected guest workload.
 
 HBX stage 2 ([#20](https://github.com/astraea-emu/nx2-lab/issues/20)) remains a
 bounded secondary regression. Device research follows the separate

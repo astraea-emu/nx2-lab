@@ -4,10 +4,10 @@ Independent conformance tools and source-authored workloads for Switch 2
 emulation research. The MIT lab contains a small AArch64 correctness oracle
 and reproducible tests of separately built emulator runtimes.
 
-**Current result:** an original synthetic ExeFS guest completes process
-startup, service-manager IPC, reply checks, handle cleanup and natural exit in
-a pinned, patched Eden runtime on Linux. **Next:** strict native-GPU
-qualification. Production-engine selection remains **HOLD**. No hardware ABI
+**Current result:** 62 native unit cases pass in a pinned Eden source build;
+original synthetic ExeFS guests also complete checked service-manager IPC and
+natural exit on Linux. **Next:** native display service lifecycle checked by the guest.
+Production-engine selection remains **HOLD**. No hardware ABI
 parity, guest-produced frame or commercial-game support is established.
 See [measured status](docs/STATUS.md) and [the active plan](docs/PLAN.md).
 
