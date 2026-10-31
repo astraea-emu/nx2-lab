@@ -10,10 +10,26 @@ Source revision: `0x2593/Eden-NS2` commit `e2f285ab1ecd3a2475c2ccad66f23b06b94ea
 
 ## Executable test
 
-1. Check out the exact original GPL source and apply the *already documented* Clang cast correction in an isolated runner. Build unmodified `core` and `video_core` libraries; exclude the *separate* 31 stale macro-interpreter Catch2 cases exactly as PR #27 documented.
+1. Check out the exact original GPL source and apply the *already documented* Clang cast correction in an isolated runner. Build unmodified `core` and `video_core` libraries; exclude the *separate* native-GPU translation unit containing 31 Catch2 cases because its MME cases target obsolete APIs, exactly as PR #27 documented. The [coverage clarification](eden_ns2_full_build_gate_2026-10-30.md) distinguishes its eight MME-related cases from the other 23 excluded GPU cases.
 2. Append a single **NX2-authored** Catch2 case to the original `src/tests/core/program_metadata.cpp` in the isolated checkout. It loads synthetic `MakeMetadata(true)`, confirms `UsesExtendedAcid()` and `IsSwitch2()`, reuses the **same object** with `MakeMetadata(false)`, and asserts both classifications clear.
 3. Run the real original emulator metadata implementation with the added case **before** any metadata fix. If it passes, report the original source is already correct; do not fabricate a failure. If it fails, require the case and `IsSwitch2` assertion in the error output; preserve the log.
 4. Only on a reproduced failure, verify the exact `src/core/file_sys/program_metadata.cpp` blob, insert exactly one `is_switch2 = false;` at the beginning of `Load`, show the one-line diff, rebuild the real test target and run both original `[loader][npdm]` and newly added reload regressions. If no failure occurred, do not patch.
 5. Keep upstream C++ entirely in the temporary GPL-side build; do not import proprietary or GPL-licensed source into the MIT NX2 Lab.
 
-This checks **internal implementation correctness**, not the Switch 2 NPDM format against physical hardware. A passing patched variant cannot be represented as a pristine original upstream build. Production-engine ACCEPT also remains blocked on a source-authored guest and the 31 stale MME tests. The active guest-execution milestone remains PR #28.
+This checks **internal implementation correctness**, not the Switch 2 NPDM format against physical hardware. A passing patched variant cannot be represented as a pristine original upstream build. Production-engine ACCEPT also requires stronger native-facing workload evidence and qualification of the 31 excluded native-GPU cases; they are not all MME tests.
+
+## Verified result and current continuation — October 31
+
+[Run 41136582253](https://github.com/astraea-emu/nx2-lab/actions/runs/41136582253)
+reproduced the stale `IsSwitch2()` state in the original implementation, then
+passed the regression after the isolated one-line reset. [PR #30](https://github.com/astraea-emu/nx2-lab/pull/30)
+merged that original-source experiment. This result remains separate from the
+later NRO lifecycle and synthetic extended-ExeFS/service-manager execution
+controls in merged [#28](https://github.com/astraea-emu/nx2-lab/pull/28) and
+[#32](https://github.com/astraea-emu/nx2-lab/pull/32).
+
+The active next gate is [strict native-GPU qualification](eden_native_gpu_test_reconciliation_2026-10-31.md),
+with 29 restoration candidates and two unresolved DMA contracts. Production
+adoption remains **HOLD**; hardware ABI fidelity, graphics, loader robustness
+and relevant host-platform coverage remain separate conditions. See
+[live status](../STATUS.md) for the measured results and current decision.

@@ -7,6 +7,49 @@ mistake of accumulating a long list of isolated components without progressing
 one frozen executable. The initial goal is to be useful to developers long
 before a Switch 2 commercial game boots.
 
+## Active gate — strict native-GPU qualification within #21
+
+The Eden NRO lifecycle control in [#28](https://github.com/astraea-emu/nx2-lab/pull/28)
+and the synthetic extended-ExeFS lifecycle/guest-checked service-manager control
+in [#32](https://github.com/astraea-emu/nx2-lab/pull/32) have passed and merged.
+The [actual combined runtime run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596)
+verified baseline status **0**, invalid-META rejection status **1**, and IPC
+status **0** with all 21 observed guest fields, handle cleanup and real process
+exit. All seven PR #32 checks passed at the tested head. [Live status](STATUS.md)
+records the exact revisions and remaining limits. Production-engine selection
+remains **HOLD**.
+
+The active next #21 slice is strict native-GPU qualification under
+[Adaptive Strategy](ADAPTIVE_STRATEGY.md). The existing test exclusion removes
+31 cases in one native-GPU file: eight concern MME and 23 cover other GPU
+behavior. Source review identifies **29 restoration candidates**: 24 cases
+without the stale interpreter interface and five with bounded compatibility
+adaptations. These are not full-runtime passes. Two DMA cases require an
+explicit contract decision because their ownership and size policy changed;
+preserve those unresolved expectations instead of weakening them to obtain
+green CI.
+
+Restore the declared scope with exact-source guards and preserved assertions.
+Execute the actual linked target with `EDEN_NATIVE_STRICT=1`, record the case
+inventory and first actual failure, and keep any remaining exclusions explicit.
+A source review or temporary interpreter probe does not qualify the integrated
+target. The [31-case reconciliation audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
+defines the exact source and adaptation boundaries for this implementation.
+
+This order follows the frozen runtime's behavior: its
+[QMD scheduler](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/video_core/native_qmd.h)
+can otherwise skip unsupported shader work and still report completion.
+Choose the next guest graphics/display workload from the measured results and
+require actual image readback before claiming a frame. The observed NRO
+crypto assertion and original loader bounds remain supporting robustness
+repairs and production blockers; no evidence currently puts that crypto
+failure on the controlled ExeFS path. Device ABI fidelity requires independent
+hardware observations or authoritative public ABI evidence.
+
+The E-lane below is the long-term dependency map. It does not authorize
+rebuilding an entire CPU/HLE/GPU stack independently of the qualified-engine
+comparison. HBX stage 2 remains a bounded secondary regression.
+
 ## R-lane: console security research (opt-in and controlled)
 
 - **R0 — provenance and threat model:** inventory original research sources,
@@ -33,8 +76,8 @@ before a Switch 2 commercial game boots.
   checked guest memory are implemented as generic exercises; the source-owned SVC instruction now stops before retirement; a **mock-only**
   continuation contract checks the immutable word/immediate, supplies an
   explicitly selected fixture return, and advances to the next instruction.
-  Next evaluate a maintained AArch64 backend and eventually independently
-  authored external homebrew; never substitute mock semantics for Horizon. The
+  Independent external homebrew has since been exercised through separate
+  NeXo/Eden research builds; never substitute these mock semantics for Horizon. The
   NX2OWNED envelope is NOT a Nintendo executable format.
 - **E3 — homebrew runtime:** only observed Horizon semantics/IPC, real homebrew
   memory/events/filesystem/input, scoped to an exact source revision.
@@ -46,7 +89,7 @@ before a Switch 2 commercial game boots.
   read-only profile; first instruction only after verified ABI, source
   provenance and containment. Game/render claims are separate evidence gates.
 
-## Portfolio time allocation proposal
+## Earlier portfolio time allocation proposal
 
 For the next focused sprint, NX2 Lab 70%, Astraea 20%, ecosystem contribution/
 communication 10%, with an explicit re-evaluation when an objective milestone

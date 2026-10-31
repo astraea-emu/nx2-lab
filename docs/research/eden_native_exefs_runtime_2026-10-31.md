@@ -1,6 +1,6 @@
 # Issue #21 — Original native ExeFS/NPDM runtime qualification (2026-10-31)
 
-**Corrected native lifecycle outcomes independently verified; revised workflow and IPC acceptance pending.** This workflow tests the wholly NX2-authored `main` NSO0 plus synthetic extended-ACID `main.npdm` created in merged PR #31 through the **actual pinned Eden command-line executable**. Its first run reached the guest's own SVC output on the native-classified path, then failed lifecycle acceptance. The corrected runtime produced natural valid exit and typed invalid rejection; its workflow exposed a diagnostic-format mistake in the checker, documented below. This does not establish physical Switch 2 ABI compatibility.
+**Native lifecycle and real service-manager IPC controls passed; PR #32 merged.** This workflow tests the wholly NX2-authored `main` NSO0 plus synthetic extended-ACID `main.npdm` created in merged PR #31 through the **actual pinned Eden command-line executable**. Its first run reached the guest's own SVC output on the native-classified path, then failed lifecycle acceptance. A later runtime produced natural valid exit and typed invalid rejection but exposed a diagnostic-format mistake in the checker. The final run passed the corrected controls and the new IPC guest, as recorded below. This does not establish physical Switch 2 ABI compatibility.
 
 Pinned source: GPL `0x2593/Eden-NS2` SHA `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c`, with the measured one-line Clang cast correction and the explicit, original-blob-checked process-exit/SDL cleanup overlay from PR #28 in an isolated runner. This is a patched reference build, not unmodified Eden. No GPL implementation files, device SDK, game, keys or firmware data are vendored into MIT NX2. Input `main` SHA-256 `508edcf6870546ed2f67c6ed11f0df3deb0242427ea2b9d7562ae6d015084ed5`; corrected synthetic `main.npdm` SHA-256 `64e25a2e3e37495d75341f9564afa3e6a665f10f94b36ea7e4e3c533b4573148`. Original guest uses ARM64 instructions to request output of `NX2 original extended ExeFS guest reached debug SVC`.
 
@@ -47,14 +47,34 @@ and embedded NUL corruption fail. Its **26 regression tests pass**. Two
 independent replays of the preserved actual logs, using their observed statuses
 0 and 1, pass the corrected gate. Raw artifact ZIP SHA-256:
 `ffeaf07fda13c16ce5d5fa2e3e8c6cdd29a8f02619605f93fd9a5b6814c087df`.
-This does not turn the original failed CI run green; the revised head must run.
+This does not turn the original failed CI run green; the final record below
+documents the separate successful run of the revised head.
 
 The failed checker also skipped the old cache post-save. The workflow now
 saves compiler objects explicitly before runtime acceptance, while preserving
 job failure when any test fails. Build parallelism is capped at four workers
 only when the runner reports at least four CPUs, 14 GiB total and 12 GiB
 available memory; otherwise it uses at most two. These changes affect build
-cost, not emulator acceptance. The next run retains both controls and adds the
+cost, not emulator acceptance. The final run retained both controls and added the
 [original reply-checking service-manager guest](eden_native_ipc_runtime_2026-10-31.md).
+
+## Final workflow acceptance
+
+[Run 41233784596](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596)
+passed at head `6adfaada80f9afdea3175629d8f5d144d5c6cd34`. The original
+valid control exited **0**, malformed META exited **1** with the exact typed
+NPDM diagnostic, and the IPC guest exited **0** after verifying all 21
+observed fields and closing its two distinct handles. The valid and invalid
+controls retained their required source provenance and fault checks; no
+execution assertion, fault or unexpected stub was observed in the raw logs.
+
+All seven checks for the commit passed before
+[PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) merged as
+`2d9bb0064f4d53b255805fffcb28839977e374c4`. The source tree matches the tested
+tree `d29a2c05297a6e4e2115428ad90097a84bc60c98`. The
+[IPC record](eden_native_ipc_runtime_2026-10-31.md) preserves every observed
+reply field and the three-log artifact digest. These results close the bounded
+CPU/HLE lifecycle and service-manager workload; production adoption remains
+HOLD.
 
 **Limitations:** even passing this check proves only synthetic guest execution through Eden's experimental *modeled* native program pathway. It is not hardware-backed Switch 2 ABI fidelity, 3D rendering, firmware emulation, commercial game compatibility, host platform parity or production-engine acceptance. Continue #21's HOLD until stricter Switch 2 evidence is obtained. The independently confirmed original-source metadata stale-state bug/isolated repair from merged PR #30 is a separate prerequisite. The excluded upstream native-GPU test file still leaves 31 cases unqualified: eight MME cases and 23 other GPU cases.

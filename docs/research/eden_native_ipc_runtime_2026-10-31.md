@@ -1,8 +1,70 @@
 # Issue #21 — source-authored ExeFS service-manager roundtrip
 
-**Status: source-authored guest implemented; real runtime qualification pending.** This extends the
+**Status: actual guest IPC and both original controls passed; PR #32 merged.** This extends the
 same controlled native-classified ExeFS route beyond debug output and process
 exit. It does not replace the original debug/exit or malformed-NPDM controls.
+
+## Verified real runtime result
+
+[Run 41233784596](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596),
+job `124633185031`, passed at head
+`6adfaada80f9afdea3175629d8f5d144d5c6cd34`. All seven checks for that commit
+passed, and [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) merged as
+`2d9bb0064f4d53b255805fffcb28839977e374c4`.
+
+The actual source-built runtime executed the original ARM64 guest. All 21
+records appeared once in order through the real debug SVC. These values were
+read from SVC returns and the guest's response buffer, then formatted by the
+guest itself:
+
+| Observed field | Value in this run |
+| --- | --- |
+| `connect_rc` | `0x00000000` |
+| `sm_handle` | `0x000103fe` |
+| `init_transport` | `0x00000000` |
+| `init_magic` | `0x4f434653` |
+| `init_result` | `0x00000000` |
+| `init_header` | `0x0000000a` |
+| `init_descriptor` | `0x00000000` |
+| `get_transport` | `0x00000000` |
+| `get_magic` | `0x4f434653` |
+| `get_result` | `0x00000000` |
+| `get_header` | `0x8000000a` |
+| `get_descriptor` | `0x00000020` |
+| `service_handle` | `0x000183fd` |
+| `invalid_transport` | `0x00000000` |
+| `invalid_magic` | `0x4f434653` |
+| `invalid_result` | `0x00000c15` |
+| `invalid_header` | `0x0000000a` |
+| `invalid_descriptor` | `0x00000000` |
+| `close_service` | `0x00000000` |
+| `close_sm` | `0x00000000` |
+| `fail_step` | `0x00000000` |
+
+The service-manager and service handles were nonzero and distinct. Initialize
+and service acquisition returned successful transport and service results;
+the empty-name request returned successful transport with the expected
+`0x00000c15` service error and no handle descriptor. Both handles closed
+successfully. The guest emitted its completion record at log time
+`0.696657`, then the real ExitProcess event at `0.696665`; host exit status
+was **0**. No execution assertion, fault, stub fallback or protocol error was
+observed. Handle values are observations from this run, not constants required
+by future runs.
+
+The same job independently passed the original debug/exit control with status
+**0** and the corrupted-META control with typed `0007-0004` rejection and
+status **1**, with no negative guest markers or execution faults/assertions.
+The compiler cache was saved before those runtime trials.
+
+All three raw logs were independently downloaded and checked against uploaded
+artifact ZIP SHA-256
+`fcc0fc5db1087e9816f00690db37c25f71cb4148b64fd4a6f653f33bdbc70b60`.
+Their sizes were 16,644 bytes (valid), 2,367 bytes (invalid), and 19,826 bytes
+(IPC). A complete scan found no assertion, execution-fault or stub markers.
+The expected empty-name service error and nonfatal setup, missing-title,
+network-initialization and play-time diagnostics remain visible; this is a
+bounded successful workload, not a claim that every runtime subsystem is
+qualified.
 
 ## Workload and acceptance
 
@@ -14,7 +76,7 @@ and requests process exit.
 
 Success requires all of the following in the actual source-built emulator:
 
-1. The source-tagged 12 GiB program classification from the baseline trial.
+1. The source-tagged 12 GiB program classification in the IPC trial's own log.
 2. Successful `ConnectToNamedPort` and a nonzero service-manager handle.
 3. Successful IPC transport and an `SFCO` reply with result zero for Initialize.
 4. Successful GetService transport and service result, with exactly one moved
