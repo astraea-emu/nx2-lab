@@ -1,0 +1,240 @@
+name: P0 Eden-NS2 native NPDM reload regression (Linux)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/p0-eden-ns2-npdm-reload.yml'
+      - 'docs/research/eden_ns2_npdm_reload_2026-10-30.md'
+
+permissions:
+  contents: read
+
+jobs:
+  eden-runtime:
+    name: Original extended-ACID to legacy reload, then minimal isolated repair
+    runs-on: ubuntu-26.04
+    timeout-minutes: 50
+    steps:
+      - name: NX2 checkout (no retained credentials)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Linux source-build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            clang cmake ninja-build autoconf automake libtool pkg-config nasm \
+            g++ git python3 python3-pip ca-certificates \
+            libfmt-dev liblz4-dev nlohmann-json3-dev libzstd-dev \
+            libssl-dev zlib1g-dev libboost-dev libboost-fiber-dev libboost-context-dev \
+            libxbyak-dev catch2 libopus-dev libasound2-dev \
+            libavcodec-dev libavfilter-dev libswscale-dev \
+            libvulkan-dev vulkan-utility-libraries-dev \
+            spirv-tools spirv-headers glslang-tools libsdl3-dev \
+            libenet-dev libusb-1.0-0-dev libva-dev libvdpau-dev \
+            libxext-dev libxkbcommon-dev
+          cmake --version | head -1
+          clang++ --version | head -1
+      - name: Fetch exact original Eden-NS2 GPL source (no vendor executables)
+        shell: bash
+        env:
+          EDEN_SHA: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eden"
+          git -C "$RUNNER_TEMP/eden" init -q
+          git -C "$RUNNER_TEMP/eden" remote add origin https://github.com/0x2593/Eden-NS2.git
+          git -C "$RUNNER_TEMP/eden" -c protocol.version=2 fetch --quiet \
+            --no-tags --depth=1 --filter=blob:none origin "$EDEN_SHA"
+          git -C "$RUNNER_TEMP/eden" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/eden" rev-parse HEAD)" = "$EDEN_SHA"
+          test -f "$RUNNER_TEMP/eden/src/core/CMakeLists.txt"
+          test -f "$RUNNER_TEMP/eden/src/video_core/CMakeLists.txt"
+          test -f "$RUNNER_TEMP/eden/src/tests/CMakeLists.txt"
+          test -s "$RUNNER_TEMP/eden/LICENSE.txt"
+          test -z "$(git -C "$RUNNER_TEMP/eden" status --porcelain --untracked-files=no)"
+          echo "NX2_EDEN_FULL_SOURCE_PIN_PASS"
+          echo "upstream_sha=$EDEN_SHA"
+      - name: Apply one measured build-only narrowing fix to isolated upstream tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Original frozen Clang build failed: signed s32 layer narrowed in u64{layer}.
+          # For-loop starts layer at 0, increments while below resources.layers:
+          # conversion to u64 is safe, with no guest API/behavior change intended.
+          export EDEN_SOURCE="$RUNNER_TEMP/eden"
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import subprocess
+          root = pathlib.Path(os.environ['EDEN_SOURCE'])
+          name = 'src/video_core/texture_cache/util.cpp'
+          path = root / name
+          expected = '94e841e8ea4e13beb547ecc1653b5088b770a166'
+          actual = subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip()
+          assert actual == expected, f'Frozen file provenance mismatch: {actual}'
+          old = 'const u64 segment_begin = u64{layer} * layer_stride + level_offset;'
+          new = 'const u64 segment_begin = static_cast<u64>(layer) * layer_stride + level_offset;'
+          source = path.read_text()
+          assert source.count(old) == 1, 'Expected exact one-line Clang narrowing defect'
+          assert 'for (s32 layer = 0; layer < info.resources.layers; ++layer)' in source
+          path.write_text(source.replace(old, new))
+          assert path.read_text().count(new) == 1
+          PY
+          git -C "$RUNNER_TEMP/eden" diff --check
+          git -C "$RUNNER_TEMP/eden" diff -- src/video_core/texture_cache/util.cpp
+          test "$(git -C "$RUNNER_TEMP/eden" diff --numstat | awk '{print $1, $2, $3}')" =             '1 1 src/video_core/texture_cache/util.cpp'
+          echo 'NX2_EDEN_ONE_LINE_BUILD_PATCH_VERIFIED'
+      - name: Configure actual upstream emulator libraries and tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=OFF \
+            -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF \
+            -DENABLE_LIBUSB=OFF -DENABLE_CUBEB=OFF \
+            -DENABLE_OPENGL=OFF -DYUZU_ROOM=OFF \
+            -DYUZU_CMD=OFF -DYUZU_TESTS=ON -DBUILD_TESTING=ON \
+            -DENABLE_WERROR=OFF \
+            -DYUZU_USE_CPM=ON
+          test -f "$RUNNER_TEMP/eden-build/build.ninja"
+          echo 'NX2_EDEN_FULL_CONFIGURE_PASS'
+      - name: Compile original CPU/HLE/GPU library targets before any test exclusions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$RUNNER_TEMP/eden-build" --target core video_core --parallel 2
+          echo 'NX2_EDEN_ORIGINAL_CORE_VIDEO_LIBRARIES_COMPILED'
+      - name: Isolate source-incompatible upstream macro tests transparently
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EDEN_SOURCE="$RUNNER_TEMP/eden"
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import subprocess
+          root = pathlib.Path(os.environ['EDEN_SOURCE'])
+          name = 'src/tests/CMakeLists.txt'
+          original_blob = 'ff1168471c5eb45aa54b78892b5f65e03391688f'
+          actual = subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip()
+          assert actual == original_blob, f'Frozen tests/CMakeLists blob mismatch: {actual}'
+          target = root / name
+          source = target.read_text()
+          removed = '    core/native_gpu_characteristics.cpp\n'
+          assert source.count(removed) == 1
+          target.write_text(source.replace(removed, ''))
+          PY
+          git -C "$RUNNER_TEMP/eden" diff --check
+          git -C "$RUNNER_TEMP/eden" diff -- src/tests/CMakeLists.txt
+          test "$(git -C "$RUNNER_TEMP/eden" diff --numstat -- src/tests/CMakeLists.txt)" =             "$(printf '0\t1\tsrc/tests/CMakeLists.txt')"
+          echo 'NX2_EDEN_STALE_NATIVE_GPU_TESTS_EXCLUDED_NOT_PASSED'
+          # The intact upstream test suite failed at 1450/1459 compile steps
+          # with removed/changed macro Interpreter APIs. Don't report it as passing.
+          cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang             -DCMAKE_CXX_COMPILER=clang++             -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=OFF             -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF             -DENABLE_LIBUSB=OFF -DENABLE_CUBEB=OFF             -DENABLE_OPENGL=OFF -DYUZU_ROOM=OFF             -DYUZU_CMD=OFF -DYUZU_TESTS=ON -DBUILD_TESTING=ON             -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
+      - name: Add NX2-authored test to exact original upstream C++ metadata translation unit
+        shell: bash
+        run: |
+          set -euo pipefail
+          export EDEN_SOURCE="$RUNNER_TEMP/eden"
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          root = pathlib.Path(os.environ['EDEN_SOURCE'])
+          name = 'src/tests/core/program_metadata.cpp'
+          expected = 'b5af9953f448e2880a6eff0f2a063e4ea77de1fa'
+          actual = subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip()
+          assert actual == expected, f'Original metadata unit provenance mismatch: {actual}'
+          source = (root / name).read_text()
+          assert 'std::vector<u8> MakeMetadata(bool extended)' in source
+          assert 'TEST_CASE("Reloading legacy metadata clears extended ACID state"' in source
+          test = '''
+          // NX2-owned original-source regression; appended only to an ephemeral GPL test build.
+          TEST_CASE("NX2 native NPDM reload clears Switch 2 identity", "[nx2-metadata]") {
+              FileSys::ProgramMetadata metadata;
+              REQUIRE(metadata.Load(std::make_shared<FileSys::VectorVfsFile>(MakeMetadata(true))) ==
+                      Loader::ResultStatus::Success);
+              REQUIRE(metadata.UsesExtendedAcid());
+              REQUIRE(metadata.IsSwitch2());
+              REQUIRE(metadata.Load(std::make_shared<FileSys::VectorVfsFile>(MakeMetadata(false))) ==
+                      Loader::ResultStatus::Success);
+              REQUIRE_FALSE(metadata.UsesExtendedAcid());
+              REQUIRE_FALSE(metadata.IsSwitch2());
+          }
+          '''
+          (root / name).write_text(source + '\n' + test)
+          PY
+          git -C "$RUNNER_TEMP/eden" diff --check
+          echo 'NX2_EXTENDED_NPDM_REAL_SOURCE_REGRESSION_INSTALLED'
+      - name: Compile reduced upstream test target (mismatched file explicitly excluded)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$RUNNER_TEMP/eden-build" --target tests --parallel 2
+          test -x "$RUNNER_TEMP/eden-build/bin/tests"
+          echo 'NX2_EDEN_REDUCED_TEST_TARGET_COMPILED'
+      - name: Execute original source against added reload regression (capture baseline truth)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$RUNNER_TEMP/eden-build/bin/tests"
+          set +e
+          "$bin" '[nx2-metadata]' --reporter compact \
+            > "$RUNNER_TEMP/npdm-before.log" 2>&1
+          rc=$?
+          set -e
+          cat "$RUNNER_TEMP/npdm-before.log"
+          echo "NX2_NPDM_ORIGINAL_BASELINE_RC=$rc"
+          if [ "$rc" -eq 0 ]; then
+            echo 'NX2_NPDM_ORIGINAL_ALREADY_PASSES_NO_FIX_NEEDED'
+            touch "$RUNNER_TEMP/npdm-original-passed"
+          else
+            # A failing assertion in the added case is the expected source bug;
+            # a crash, no-test match, unrelated test or missing log is NOT proof.
+            # Catch2 compact prints the failing expression and count, not the
+            # TEST_CASE title. Only accept the exact original assertion failure.
+            test "$rc" -eq 42
+            grep -Fq 'failed: !(metadata.IsSwitch2()) for: !true' "$RUNNER_TEMP/npdm-before.log"
+            grep -Fq 'test cases: 1 | 1 failed' "$RUNNER_TEMP/npdm-before.log"
+            grep -Fq 'assertions: 6 | 5 passed | 1 failed' "$RUNNER_TEMP/npdm-before.log"
+            echo 'NX2_NPDM_ORIGINAL_STALE_SWITCH2_FLAG_REPRODUCED'
+          fi
+      - name: Apply exact one-line isolated GPL-side correction if regression demonstrated
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f "$RUNNER_TEMP/npdm-original-passed" ]; then
+            echo 'NX2_NPDM_NO_PATCH_ORIGINAL_PASSED'
+            exit 0
+          fi
+          export EDEN_SOURCE="$RUNNER_TEMP/eden"
+          python3 - <<'PY'
+          import os, pathlib, subprocess
+          root = pathlib.Path(os.environ['EDEN_SOURCE'])
+          name = 'src/core/file_sys/program_metadata.cpp'
+          expected = '4682cf7ab52e7509802885d63dfc2498613e305f'
+          actual = subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip()
+          assert actual == expected, f'Frozen implementation drift: {actual}'
+          source = (root / name).read_text()
+          original = 'Loader::ResultStatus ProgramMetadata::Load(VirtualFile file) {\n    uses_extended_acid = false;'
+          replacement = original + '\n    is_switch2 = false;'
+          assert source.count(original) == 1
+          (root / name).write_text(source.replace(original, replacement))
+          PY
+          git -C "$RUNNER_TEMP/eden" diff --check
+          git -C "$RUNNER_TEMP/eden" diff -- src/core/file_sys/program_metadata.cpp
+          test "$(git -C "$RUNNER_TEMP/eden" diff --numstat -- src/core/file_sys/program_metadata.cpp)" = \
+            "$(printf '1\t0\tsrc/core/file_sys/program_metadata.cpp')"
+          echo 'NX2_NPDM_ONE_LINE_ISOLATED_SOURCE_FIX_VERIFIED'
+      - name: Rebuild and run original-source metadata regression after conditional repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build "$RUNNER_TEMP/eden-build" --target tests --parallel 2
+          "$RUNNER_TEMP/eden-build/bin/tests" '[loader][npdm],[nx2-metadata]' \
+            --reporter compact | tee "$RUNNER_TEMP/npdm-after.log"
+          echo 'NX2_NPDM_REAL_SOURCE_RELOAD_REGRESSION_PASS'
