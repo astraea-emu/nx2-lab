@@ -1,6 +1,9 @@
-# NX2 Lab — GitHub publication and history
+# Repository publication history — October 29, 2026
 
-**Live repository:** https://github.com/astraea-emu/nx2-lab
+**Historical record.** The repository is already published. See
+[Contributing](../CONTRIBUTING.md) for the current development workflow.
+
+**Repository:** https://github.com/astraea-emu/nx2-lab
 
 The complete **36-file tracked source tree** was published through the
 connected GitHub Git-object API on 2026-10-29, with tree SHA
@@ -14,20 +17,6 @@ Its **commit history** therefore differs from the original seven-commit
 local development history. That original history is preserved separately
 in `nx2-lab-20261029-v2.bundle`, supplied with the handoff.
 No force-push or history rewrite is necessary for future development.
-
-## Normal contributor workflow
-
-```sh
-git clone https://github.com/astraea-emu/nx2-lab.git
-cd nx2-lab
-cmake -S . -B build -DBUILD_TESTING=ON
-cmake --build build --parallel 2
-ctest --test-dir build --output-on-failure
-```
-
-Create a feature branch, test it locally, and open a pull request.
-GitHub Actions runs Linux, Windows, macOS and Linux sanitizers.
-Use the PR's **exact final head** and successful checks before merging.
 
 ## Evidence-byte portability
 

@@ -5,10 +5,11 @@ on:
     paths:
       - '.github/workflows/e3-hbx-original-stage1.yml'
       - 'tools/reference/hblauncher/**'
-      - 'docs/STATUS.md'
-      - 'docs/research/hblauncher_original_guest_2026-10-29.md'
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   hbx-original-stage1:
     name: NX2 executes original HBX stage 1
@@ -16,6 +17,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install pinned source build dependencies
         run: |
           sudo apt-get update

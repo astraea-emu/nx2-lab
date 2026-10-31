@@ -50,6 +50,9 @@ def check():
         'mutated_literal_pointer': changed(0xB0 + 0x20, 0x4000, '<Q'),
         'mutated_data_bytes': changed(0x140, b'NOPE', '<4s'),
         'data_not_read_write': changed(120 + 4, 4, '<I'),
+        'data_write_only': changed(120 + 4, 2, '<I'),
+        'data_no_access': changed(120 + 4, 0, '<I'),
+        'data_executable': changed(120 + 4, 7, '<I'),
     }
     duplicate = bytearray(make_fixture())
     # A third executable PT_LOAD also covering entry must be refused.

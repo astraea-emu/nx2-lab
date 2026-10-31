@@ -65,10 +65,11 @@ def make_owned_image(data: bytes) -> tuple[bytes, int, int]:
            'original_literal_within_rx_segment')
     pointer = struct.unpack_from('<Q', code, literal_offset)[0]
     # Independently verify that the original literal points to the
-    # exact bytes in a separate, file-backed, nonexecutable data PT_LOAD.
+    # exact bytes in the original separate, file-backed RW (PF_R | PF_W),
+    # nonexecutable data PT_LOAD. Write permission alone does not permit reads.
     data_matches = []
     for data_flags, data_offset, data_va, data_size in loads:
-        if (data_flags & 1) == 0 and data_flags & 2 and (
+        if data_flags == 6 and (
             data_va <= pointer and
             pointer - data_va <= data_size and
             len(SOURCE_MESSAGE) <= data_size - (pointer - data_va)):

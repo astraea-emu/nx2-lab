@@ -7,10 +7,13 @@ on:
       - '.github/workflows/p0-native-exefs-fixture.yml'
       - 'tools/reference/eden_ns2/make_native_exefs.py'
       - 'tools/reference/eden_ns2/test_make_native_exefs.py'
-      - 'docs/research/eden_native_exefs_fixture_2026-10-30.md'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   original-exefs:

@@ -1,5 +1,7 @@
 # NX2 Lab — Switch 2 competitive architecture audit (2026-10-30)
 
+> **Historical snapshot.** Capability statements, allocations and target dates below describe the October 30 review. Later runtime/IPC results are in [current status](STATUS.md); [the active plan](PLAN.md) owns the next gate.
+
 > **Snapshot / confidence:** public GitHub trees, issue and CI metadata, upstream author logs and public technical notes, checked 2026-10-30. Author screenshots and performance claims are **not** independently reproduced game compatibility. Private branches and unpublished work are outside this census.
 
 ## Verdict

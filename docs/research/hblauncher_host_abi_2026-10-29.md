@@ -1,5 +1,7 @@
 # First independently authored native-facing ABI intake — HBLauncher
 
+> **Initial host-reference stage.** Later [original HBX guest execution](hblauncher_original_guest_2026-10-29.md) is a separate experiment. See [current status](../STATUS.md) for the active runtime work.
+
 **Snapshot date:** 2026-10-29. **Evidence category:** public original
 source review, then reproducible **host/QEMU AArch64** execution only.
 This is NOT a Switch 2 console observation, not Horizon IPC, and not an
@@ -59,7 +61,7 @@ It becomes an NX2 emulator workload only when our own guest loader and
 chosen backend execute its original AArch64 instructions with verified
 mapped context/memory and typed first unimplemented boundary.
 
-## Next acceptance gate
+## Follow-up proposed at this checkpoint
 
 1. Freeze a generated, original HBX sample binary and its source/toolchain
    manifest; inspect entry, memory layout and loader format without changing

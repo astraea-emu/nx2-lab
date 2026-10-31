@@ -1,5 +1,7 @@
 # Issue #21 — frozen Eden-NS2 native-interface source qualification (2026-10-30)
 
+> **Header-contract stage.** Subsequent [integrated build](eden_ns2_full_build_gate_2026-10-30.md) and [guest IPC](eden_native_ipc_runtime_2026-10-31.md) experiments have separate evidence. See [current status](../STATUS.md) for the latest decision.
+
 **Decision: HOLD.** This is a direct-source evaluation of Switch 2-facing **emulator implementation code**, not a production runtime build, physical console observation, complete Horizon service or guest game execution.
 
 ## Input and provenance
@@ -26,6 +28,6 @@ Runs twice with GNU C++ and Clang/ASan/UBSan. Explicit unsupported and malformed
 - A source-coded emulation contract is not a device-derived behavioral oracle. It may precisely implement the author's assumptions and still differ from a physical Switch 2.
 - GPL code stays outside the MIT NX2 Lab tree and its distributed binaries. Any selected GPL engine requires license and supply-chain review.
 
-## Next decisive gate
+## Follow-up proposed at this checkpoint
 
 Configure and build the actual frozen Eden-derived loader/CPU/HLE runtime using isolated CI and vetted dependencies. Then execute a permitted source-authored guest program, checking its first unsupported interface; also investigate GPU correctness against independently authored expected pixels. The current work does **not** select Eden-NS2 as the production engine.

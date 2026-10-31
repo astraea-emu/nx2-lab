@@ -7,10 +7,13 @@ on:
       - '.github/workflows/p0-nro-preflight.yml'
       - 'tools/reference/eden_ns2/nro_preflight.py'
       - 'tools/reference/eden_ns2/test_nro_preflight.py'
-      - 'docs/research/eden_nro_input_preflight_2026-10-30.md'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-nro-preflight:

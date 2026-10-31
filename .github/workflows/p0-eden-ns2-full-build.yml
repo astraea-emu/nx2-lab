@@ -1,20 +1,30 @@
-name: P0 Eden-NS2 full runtime source-build gate (Linux 26.04)
+name: P0 Eden-NS2 strict native GPU source-build gate (Linux 26.04)
 
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - '.github/workflows/p0-eden-ns2-full-build.yml'
-      - 'docs/research/eden_ns2_full_build_gate_2026-10-30.md'
+      - 'tools/reference/eden_ns2/overlay_native_gpu_tests.py'
+      - 'tools/reference/eden_ns2/test_overlay_native_gpu_tests.py'
+      - 'tools/reference/eden_ns2/assess_native_gpu_tests.py'
+      - 'tools/reference/eden_ns2/test_assess_native_gpu_tests.py'
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   eden-runtime:
-    name: Frozen original core, loader, HLE and GPU source build + upstream tests
+    name: Frozen core and GPU build + strict restored native tests
     runs-on: ubuntu-26.04
-    timeout-minutes: 50
+    timeout-minutes: 55
+    env:
+      EDEN_NATIVE_STRICT: '1'
+      CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
     steps:
       - name: NX2 checkout (no retained credentials)
         uses: actions/checkout@v4
@@ -26,7 +36,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            clang cmake ninja-build autoconf automake libtool pkg-config nasm \
+            ccache clang cmake ninja-build autoconf automake libtool pkg-config nasm \
             g++ git python3 python3-pip ca-certificates \
             libfmt-dev liblz4-dev nlohmann-json3-dev libzstd-dev \
             libssl-dev zlib1g-dev libboost-dev libboost-fiber-dev libboost-context-dev \
@@ -38,6 +48,21 @@ jobs:
             libxext-dev libxkbcommon-dev
           cmake --version | head -1
           clang++ --version | head -1
+      - name: Restore bounded frozen-source compiler cache
+        id: eden-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/eden-cxx-cache
+          key: eden-tests-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
+          restore-keys: |
+            eden-tests-ubuntu26-clang-e2f285ab-v1-
+      - name: Initialize cache and evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CCACHE_DIR" "$RUNNER_TEMP/native-gpu-evidence"
+          ccache --max-size=1200M
+          ccache --zero-stats
       - name: Fetch exact original Eden-NS2 GPL source (no vendor executables)
         shell: bash
         env:
@@ -58,6 +83,14 @@ jobs:
           test -z "$(git -C "$RUNNER_TEMP/eden" status --porcelain --untracked-files=no)"
           echo "NX2_EDEN_FULL_SOURCE_PIN_PASS"
           echo "upstream_sha=$EDEN_SHA"
+      - name: Verify source-backed overlay and result-checker regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          NX2_EDEN_SOURCE="$RUNNER_TEMP/eden" python3 -m unittest discover -v \
+            -s tools/reference/eden_ns2 -p test_overlay_native_gpu_tests.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 \
+            -p test_assess_native_gpu_tests.py
       - name: Apply one measured build-only narrowing fix to isolated upstream tree
         shell: bash
         run: |
@@ -88,6 +121,18 @@ jobs:
           git -C "$RUNNER_TEMP/eden" diff -- src/video_core/texture_cache/util.cpp
           test "$(git -C "$RUNNER_TEMP/eden" diff --numstat | awk '{print $1, $2, $3}')" =             '1 1 src/video_core/texture_cache/util.cpp'
           echo 'NX2_EDEN_ONE_LINE_BUILD_PATCH_VERIFIED'
+      - name: Restore compatible native GPU cases with exact source guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/reference/eden_ns2/overlay_native_gpu_tests.py "$RUNNER_TEMP/eden" \
+            --manifest "$RUNNER_TEMP/native-gpu-evidence/overlay.json"
+          git -C "$RUNNER_TEMP/eden" diff --check
+          git -C "$RUNNER_TEMP/eden" diff > "$RUNNER_TEMP/native-gpu-evidence/applied.diff"
+          git -C "$RUNNER_TEMP/eden" diff --stat
+          cp "$RUNNER_TEMP/eden/LICENSE.txt" "$RUNNER_TEMP/native-gpu-evidence/UPSTREAM_LICENSE.txt"
+          printf 'EDEN_NATIVE_STRICT=%s\n' "$EDEN_NATIVE_STRICT" \
+            > "$RUNNER_TEMP/native-gpu-evidence/environment.txt"
       - name: Configure actual upstream emulator libraries and tests
         shell: bash
         run: |
@@ -95,6 +140,7 @@ jobs:
           cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=OFF \
             -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF \
             -DENABLE_LIBUSB=OFF -DENABLE_CUBEB=OFF \
@@ -104,51 +150,76 @@ jobs:
             -DYUZU_USE_CPM=ON
           test -f "$RUNNER_TEMP/eden-build/build.ninja"
           echo 'NX2_EDEN_FULL_CONFIGURE_PASS'
-      - name: Compile original CPU/HLE/GPU library targets before any test exclusions
+      - name: Build real core, GPU and reconciled Catch2 targets
         shell: bash
         run: |
           set -euo pipefail
-          cmake --build "$RUNNER_TEMP/eden-build" --target core video_core --parallel 2
-          echo 'NX2_EDEN_ORIGINAL_CORE_VIDEO_LIBRARIES_COMPILED'
-      - name: Isolate source-incompatible upstream macro tests transparently
-        shell: bash
-        run: |
-          set -euo pipefail
-          export EDEN_SOURCE="$RUNNER_TEMP/eden"
-          python3 - <<'PY'
-          import os
-          import pathlib
-          import subprocess
-          root = pathlib.Path(os.environ['EDEN_SOURCE'])
-          name = 'src/tests/CMakeLists.txt'
-          original_blob = 'ff1168471c5eb45aa54b78892b5f65e03391688f'
-          actual = subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip()
-          assert actual == original_blob, f'Frozen tests/CMakeLists blob mismatch: {actual}'
-          target = root / name
-          source = target.read_text()
-          removed = '    core/native_gpu_characteristics.cpp\n'
-          assert source.count(removed) == 1
-          target.write_text(source.replace(removed, ''))
-          PY
-          git -C "$RUNNER_TEMP/eden" diff --check
-          git -C "$RUNNER_TEMP/eden" diff -- src/tests/CMakeLists.txt
-          test "$(git -C "$RUNNER_TEMP/eden" diff --numstat -- src/tests/CMakeLists.txt)" =             "$(printf '0\t1\tsrc/tests/CMakeLists.txt')"
-          echo 'NX2_EDEN_STALE_NATIVE_GPU_TESTS_EXCLUDED_NOT_PASSED'
-          # The intact upstream test suite failed at 1450/1459 compile steps
-          # with removed/changed macro Interpreter APIs. Don't report it as passing.
-          cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang             -DCMAKE_CXX_COMPILER=clang++             -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=OFF             -DENABLE_UPDATE_CHECKER=OFF -DUSE_DISCORD_PRESENCE=OFF             -DENABLE_LIBUSB=OFF -DENABLE_CUBEB=OFF             -DENABLE_OPENGL=OFF -DYUZU_ROOM=OFF             -DYUZU_CMD=OFF -DYUZU_TESTS=ON -DBUILD_TESTING=ON             -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
-      - name: Compile reduced upstream test target (mismatched file explicitly excluded)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cmake --build "$RUNNER_TEMP/eden-build" --target tests --parallel 2
+          cpu_count=$(nproc)
+          build_jobs=$(( cpu_count < 2 ? cpu_count : 2 ))
+          memory_kib=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+          available_kib=$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo)
+          if (( cpu_count >= 4 && memory_kib >= 14 * 1024 * 1024 && available_kib >= 12 * 1024 * 1024 )); then
+            build_jobs=4
+          fi
+          echo "NX2_EDEN_BUILD_RESOURCES cpu=$cpu_count memory_kib=$memory_kib available_kib=$available_kib jobs=$build_jobs"
+          cmake --build "$RUNNER_TEMP/eden-build" --target core video_core tests --parallel "$build_jobs"
           test -x "$RUNNER_TEMP/eden-build/bin/tests"
-          echo 'NX2_EDEN_REDUCED_TEST_TARGET_COMPILED'
-      - name: Execute remaining upstream source-owned native tests (no games)
+          ccache --show-stats
+          echo NX2_EDEN_RECONCILED_TEST_TARGET_COMPILED
+      - name: Save compiler objects before test acceptance
+        if: always() && steps.eden-cache.outputs.cache-primary-key != '' && steps.eden-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/eden-cxx-cache
+          key: ${{ steps.eden-cache.outputs.cache-primary-key }}
+      - name: Verify applied source and register the full declared native inventory
         shell: bash
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/eden-build/bin/tests" '[native-gpu],[graphics-supervisor]' \
-            --reporter compact \
-            | tee "$RUNNER_TEMP/eden-runtime-native-tests.txt"
-          echo 'NX2_EDEN_REDUCED_UPSTREAM_NATIVE_TESTS_PASS'
+          python3 tools/reference/eden_ns2/overlay_native_gpu_tests.py "$RUNNER_TEMP/eden" \
+            --verify-applied --manifest "$RUNNER_TEMP/native-gpu-evidence/overlay.json"
+          EDEN_CHECKOUT="$RUNNER_TEMP/eden" python3 - <<'PY_CHECK'
+          import os, subprocess
+          root = os.environ['EDEN_CHECKOUT']
+          changed = set(subprocess.check_output(
+              ['git', '-C', root, 'diff', '--name-only'], text=True).splitlines())
+          expected = {'src/tests/core/native_gpu_characteristics.cpp',
+                      'src/video_core/texture_cache/util.cpp'}
+          if changed != expected:
+              raise RuntimeError(f'Unexpected source modifications: {changed}')
+          build_fix = subprocess.check_output(
+              ['git', '-C', root, 'hash-object',
+               'src/video_core/texture_cache/util.cpp'], text=True).strip()
+          if build_fix != 'cb197563386f76c031d17382ac516fcad73196da':
+              raise RuntimeError(f'Build-only correction changed: {build_fix}')
+          PY_CHECK
+          timeout --signal=TERM --kill-after=5s 30s "$RUNNER_TEMP/eden-build/bin/tests" \
+            '[native-gpu],[graphics-supervisor]' --list-tests --reporter xml \
+            --out "$RUNNER_TEMP/native-gpu-evidence/listed.xml"
+      - name: Execute strict restored and existing native tests and verify actual results
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          timeout --signal=TERM --kill-after=5s 120s "$RUNNER_TEMP/eden-build/bin/tests" \
+            '[native-gpu],[graphics-supervisor]' --reporter compact \
+            --reporter "xml::out=$RUNNER_TEMP/native-gpu-evidence/results.xml" \
+            2>&1 | tee "$RUNNER_TEMP/native-gpu-evidence/run.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          test "${statuses[1]}" -eq 0
+          test_rc="${statuses[0]}"
+          printf '%s\n' "$test_rc" > "$RUNNER_TEMP/native-gpu-evidence/exit-status.txt"
+          python3 tools/reference/eden_ns2/assess_native_gpu_tests.py \
+            --manifest "$RUNNER_TEMP/native-gpu-evidence/overlay.json" \
+            --listed "$RUNNER_TEMP/native-gpu-evidence/listed.xml" \
+            --results "$RUNNER_TEMP/native-gpu-evidence/results.xml" --exit "$test_rc" \
+            | tee "$RUNNER_TEMP/native-gpu-evidence/assessment.txt"
+      - name: Preserve GPL-side diff, provenance, registration and actual results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-native-gpu-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/native-gpu-evidence/

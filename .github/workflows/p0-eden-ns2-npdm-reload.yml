@@ -5,10 +5,13 @@ on:
   pull_request:
     paths:
       - '.github/workflows/p0-eden-ns2-npdm-reload.yml'
-      - 'docs/research/eden_ns2_npdm_reload_2026-10-30.md'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   eden-runtime:

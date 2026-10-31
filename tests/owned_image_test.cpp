@@ -61,5 +61,5 @@ int main() {
     require(!parse_owned_image(mutate), "zero program count admitted");
     constexpr std::array<std::byte, 0> empty{};
     require(!parse_owned_image(empty), "empty source admitted");
-    std::cout << "OWNED_EXECUTABLE_IMAGE_CONTRACT_PASS:12_checks\n";
+    std::cout << "OWNED_EXECUTABLE_IMAGE_CONTRACT_PASS\n";
 }

@@ -28,6 +28,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Validate offline watchlist and issue-update logic
         run: python3 -m unittest discover -s tests -p test_competitive_radar.py -v
 
@@ -44,6 +46,8 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Update only the metadata section of one GitHub issue
         env:
           GITHUB_TOKEN: ${{ github.token }}

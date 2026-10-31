@@ -1,6 +1,6 @@
-# Issue #21 — original native ExeFS/extended-NPDM future guest fixture
+# Issue #21 — original native ExeFS/extended-NPDM fixture
 
-**Status:** independent source-owned binary-input generation. The original fixture reached guest debug output in the [PR #32 runtime trial](https://github.com/astraea-emu/nx2-lab/actions/runs/41224123601), but its main-thread priority caused a kernel assertion and the trial failed shutdown/rejection acceptance. No Nintendo hardware execution is established.
+**Scope:** source-owned input generation ([PR #31](https://github.com/astraea-emu/nx2-lab/pull/31)) and its priority correction. The initial [runtime trial](https://github.com/astraea-emu/nx2-lab/actions/runs/41224123601) failed with a priority assertion; the corrected fixture subsequently passed the separate [runtime qualification](eden_native_exefs_runtime_2026-10-31.md). This record preserves the input bytes and first failure. No Nintendo hardware execution is established.
 
 ## Why
 
@@ -11,7 +11,7 @@ The Switch 1-style NRO control in [PR #28](https://github.com/astraea-emu/nx2-la
 `tools/reference/eden_ns2/make_native_exefs.py` generates **only two deterministic, NX2-authored files**:
 
 - `main`: uncompressed NSO0 container with 0x100-byte header, page-aligned text/rodata/data records, deterministic per-segment SHA-256 and build ID, and **original ARM64 machine instructions**. Code uses PC-relative address formation to load a source-owned debug message from rodata, invokes `SVC 0x27` (debug output), then `SVC 0x7` (exit), with an explicit bounded branch if exit unexpectedly returns. No devkit, keys, firmware, title executable, copyrighted assets or external compiler are needed to generate it.
-- `main.npdm`: original synthetic 0x600-byte META/ACI0/extended-ACID structure at the offset used by Eden's own source-authored `MakeMetadata(true)` tests, with synthetic permissions and title ID. This is **not a captured Nintendo NPDM**. Its classification and semantics must still be independently verified in the full original C++ loader, not inferred from the generator.
+- `main.npdm`: original synthetic 0x600-byte META/ACI0/extended-ACID structure at the offset used by Eden's own source-authored `MakeMetadata(true)` tests, with synthetic permissions and title ID. This is **not a captured Nintendo NPDM**. Generation alone does not verify its classification or semantics in the full original C++ loader; the separate runtime record supplies that execution evidence.
 
 The generated source-owned NSO0 deliberately stores uncompressed 0x1000-byte segments with matching stored lengths, ensuring every file range is bounded and independently hashed. Thirteen Python unit tests verify deterministic bytes, original ARM64 opcodes, segment mappings/hashes, extended metadata identification, main-thread capability consistency and fail-closed mutations. Fast CI generates twice and compares exact bytes.
 
@@ -29,12 +29,12 @@ The corrected fixture sets main-thread priority 44 and keeps core 0. **Only one 
 
 Source facts were checked at frozen Eden-NS2 revision `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c`: [metadata header](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/file_sys/program_metadata.h) blob `074c6f7908b367e20a7d0c59eb2289aeccee5fec`, [metadata defaults](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/file_sys/program_metadata.cpp) blob `4682cf7ab52e7509802885d63dfc2498613e305f`, [capability fields](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/kernel/k_capabilities.h) blob `013d952ad43862664ed856da83510022087fc8ab`, and [capability decoding](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/kernel/k_capabilities.cpp) blob `efc9ef52bf80bcd3e216b652f42a64120d76b21c`.
 
-This correction addresses the observed fixture inconsistency. It does not establish physical Switch 2 capability rules or prove that the emulator enforces all declared SVC permissions; the fixture still contains only its original core/priority descriptor. The actual corrected runtime result must be measured in PR #32.
+This correction addresses the observed fixture inconsistency. It does not establish physical Switch 2 capability rules or prove that the emulator enforces all declared SVC permissions; the fixture still contains only its original core/priority descriptor. The actual corrected runtime result is recorded in the separate [PR #32 lifecycle qualification](eden_native_exefs_runtime_2026-10-31.md).
 
-## Scope and future acceptance
+## Fixture-generation scope
 
-A passing CI result means only that we can reproducibly generate structurally consistent **candidate input** under the public fork's interpretation of NSO and extended NPDM. It does **not** demonstrate that the actual Eden loader accepts the files, that guest ARM64 instructions execute, that a debug syscall succeeds, or that this is Switch 2 ABI-compatible.
+A passing fixture-generation CI result means only that we can reproducibly generate structurally consistent **candidate input** under the public fork's interpretation of NSO and extended NPDM. It does **not** demonstrate that the actual Eden loader accepts the files, that guest ARM64 instructions execute, that a debug syscall succeeds, or that this is Switch 2 ABI-compatible.
 
-After the NRO control's real CPU/loader logs are resolved, run this exact fixture through a separately built, bounded Eden ExeFS guest trial. Reject any unsupported interface explicitly; compare original guest outputs and malformed-header controls. The native NPDM reload regression in [PR #30](https://github.com/astraea-emu/nx2-lab/pull/30) tests a different source-level correctness condition.
+Execution was a separate acceptance gate: a bounded Eden ExeFS trial with actual guest output and malformed-header controls. The [runtime record](eden_native_exefs_runtime_2026-10-31.md) now contains that measured result. The native NPDM reload regression in [PR #30](https://github.com/astraea-emu/nx2-lab/pull/30) tests a different source-level correctness condition.
 
 No GPL source is copied into the MIT repository; only technical-format facts inspected from the frozen [Eden-NS2 NSO loader](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/loader/nso.h) and the fork's original [synthetic metadata tests](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/tests/core/program_metadata.cpp) informed these new fixtures.

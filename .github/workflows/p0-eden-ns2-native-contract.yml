@@ -6,10 +6,13 @@ on:
     paths:
       - '.github/workflows/p0-eden-ns2-native-contract.yml'
       - 'tools/reference/eden_ns2/**'
-      - 'docs/research/runtime_baseline_eden_ns2_2026-10-30.md'
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   source-contract:
