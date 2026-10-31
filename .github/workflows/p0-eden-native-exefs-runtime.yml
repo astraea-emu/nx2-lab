@@ -6,7 +6,10 @@ on:
       - '.github/workflows/p0-eden-native-exefs-runtime.yml'
       - 'tools/reference/eden_ns2/assess_native_exefs.py'
       - 'tools/reference/eden_ns2/test_assess_native_exefs.py'
-      - 'docs/research/eden_native_exefs_runtime_2026-10-31.md'
+      - 'tools/reference/eden_ns2/make_native_exefs.py'
+      - 'tools/reference/eden_ns2/test_make_native_exefs.py'
+      - 'tools/reference/eden_ns2/overlay_eden_exit.py'
+      - 'tools/reference/eden_ns2/test_overlay_eden_exit.py'
 permissions:
   contents: read
 concurrency:
@@ -16,6 +19,8 @@ jobs:
   frozen-cli:
     runs-on: ubuntu-26.04
     timeout-minutes: 55
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
     steps:
       - uses: actions/checkout@v4
         with:
@@ -25,6 +30,7 @@ jobs:
           set -euo pipefail
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_make_native_exefs.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_exefs.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_overlay_eden_exit.py
           echo NX2_NATIVE_EXEFS_UNITS_PASS
       - name: Install frozen Eden command-line build dependencies
         shell: bash
@@ -32,7 +38,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-            clang cmake ninja-build autoconf automake libtool pkg-config nasm \
+            ccache clang cmake ninja-build autoconf automake libtool pkg-config nasm \
             g++ git python3 ca-certificates libfmt-dev liblz4-dev nlohmann-json3-dev \
             libzstd-dev libssl-dev zlib1g-dev libboost-dev libboost-fiber-dev \
             libboost-context-dev libxbyak-dev libopus-dev libasound2-dev \
@@ -40,6 +46,20 @@ jobs:
             vulkan-utility-libraries-dev spirv-tools spirv-headers glslang-tools \
             libsdl3-dev libenet-dev libusb-1.0-0-dev libva-dev libvdpau-dev \
             libxext-dev libxkbcommon-dev
+      - name: Restore bounded frozen-source compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/eden-cxx-cache
+          key: eden-cli-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
+          restore-keys: |
+            eden-cli-ubuntu26-clang-e2f285ab-v1-
+      - name: Initialize bounded ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CCACHE_DIR"
+          ccache --max-size=1200M
+          ccache --zero-stats
       - name: Fetch the exact GPL Eden source revision (no external binaries)
         shell: bash
         env:
@@ -54,7 +74,7 @@ jobs:
           test "$(git -C "$RUNNER_TEMP/eden" rev-parse HEAD)" = "$EDEN_SHA"
           test -s "$RUNNER_TEMP/eden/LICENSE.txt"
           echo NX2_NATIVE_EXEFS_FROZEN_SOURCE_PASS
-      - name: Apply only previously verified isolated C++ cast fix
+      - name: Apply previously verified isolated C++ cast fix
         shell: bash
         run: |
           set -euo pipefail
@@ -74,6 +94,12 @@ jobs:
           PY
           git -C "$RUNNER_TEMP/eden" diff --check
           echo NX2_NATIVE_EXEFS_CAST_ONLY
+      - name: Apply source-pinned process-exit and unloaded-image lifecycle repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/reference/eden_ns2/overlay_eden_exit.py "$RUNNER_TEMP/eden"
+          echo NX2_NATIVE_EXEFS_ISOLATED_LIFECYCLE_REPAIR
       - name: Generate and hash original ExeFS and corrupt only negative NPDM magic
         shell: bash
         run: |
@@ -82,7 +108,7 @@ jobs:
           test "$(sha256sum "$RUNNER_TEMP/valid/main" | cut -d' ' -f1)" = \
             508edcf6870546ed2f67c6ed11f0df3deb0242427ea2b9d7562ae6d015084ed5
           test "$(sha256sum "$RUNNER_TEMP/valid/main.npdm" | cut -d' ' -f1)" = \
-            211496cfef98635152c0dbd5594624daf79deadbf5eb385221db5ae5c664740c
+            64e25a2e3e37495d75341f9564afa3e6a665f10f94b36ea7e4e3c533b4573148
           cp -a "$RUNNER_TEMP/valid" "$RUNNER_TEMP/invalid"
           export NPDM="$RUNNER_TEMP/invalid/main.npdm"
           python3 - <<'PY'
@@ -94,18 +120,20 @@ jobs:
           p.write_bytes(b)
           PY
           echo NX2_NATIVE_EXEFS_PINNED_INPUTS_PASS
-      - name: Build the real upstream Eden CLI and linked CPU loader HLE GPU
+      - name: Build frozen Eden CLI with the explicit isolated lifecycle repair
         shell: bash
         run: |
           set -euo pipefail
           cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DENABLE_QT=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_UPDATE_CHECKER=OFF \
             -DENABLE_CUBEB=OFF -DENABLE_LIBUSB=OFF -DYUZU_ROOM=OFF \
             -DENABLE_OPENGL=OFF -DYUZU_CMD=ON -DYUZU_TESTS=OFF \
             -DBUILD_TESTING=OFF -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
           cmake --build "$RUNNER_TEMP/eden-build" --target yuzu-cmd --parallel 2
           test -x "$RUNNER_TEMP/eden-build/bin/eden-cli"
+          ccache --show-stats
           echo NX2_NATIVE_EXEFS_REAL_EDEN_CLI_BUILT
       - name: Run bounded valid and invalid source-authored ExeFS inputs
         shell: bash

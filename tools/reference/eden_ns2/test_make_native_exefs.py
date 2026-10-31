@@ -6,7 +6,8 @@ from pathlib import Path
 import unittest
 
 from make_native_exefs import (
-    MESSAGE, NPDM_SIZE, NSO_HEADER, PAGE, TITLE_ID,
+    MAIN_THREAD_CORE, MAIN_THREAD_PRIORITY, MESSAGE, NPDM_SIZE, NSO_HEADER, PAGE,
+    THREAD_INFO_CAPABILITY, TITLE_ID,
     build_extended_npdm, build_guest_text, build_nso,
     verify_self_authored_fixture, main,
 )
@@ -60,6 +61,58 @@ class NativeExeFsTests(unittest.TestCase):
 
     def test_valid_fixture_pair(self):
         verify_self_authored_fixture(build_nso(), build_extended_npdm())
+
+    def test_main_thread_matches_declared_core_priority_mask(self):
+        npdm = build_extended_npdm()
+        aci_offset, aci_size = struct.unpack_from("<II", npdm, 0x70)
+        kac_offset, kac_size = struct.unpack_from("<II", npdm, aci_offset + 0x30)
+        self.assertEqual(kac_size, 4)
+        self.assertLessEqual(kac_offset + kac_size, aci_size)
+        capability = struct.unpack_from("<I", npdm, aci_offset + kac_offset)[0]
+        self.assertEqual(capability, THREAD_INFO_CAPABILITY)
+        self.assertEqual(capability & 0xF, 7)
+        self.assertEqual(((capability >> 4) & 63, (capability >> 10) & 63),
+                         (63, 16))
+        self.assertEqual(((capability >> 16) & 255, (capability >> 24) & 255),
+                         (0, 3))
+        priorities = sum(1 << p for p in range(16, 64))
+        cores = sum(1 << c for c in range(4))
+        self.assertEqual(npdm[0xE], MAIN_THREAD_PRIORITY)
+        self.assertEqual(npdm[0xF], MAIN_THREAD_CORE)
+        self.assertNotEqual(priorities & (1 << npdm[0xE]), 0)
+        self.assertNotEqual(cores & (1 << npdm[0xF]), 0)
+
+    def test_disallowed_main_priority_or_core_is_refused(self):
+        for offset, value in ((0xE, 0), (0xE, 15), (0xE, 64), (0xF, 4)):
+            broken = bytearray(build_extended_npdm())
+            broken[offset] = value
+            with self.subTest(offset=offset, value=value), self.assertRaises(ValueError):
+                verify_self_authored_fixture(build_nso(), bytes(broken))
+
+    def test_declared_priority_and_core_boundaries_are_inclusive(self):
+        for priority in (16, 63):
+            for core in (0, 3):
+                changed = bytearray(build_extended_npdm())
+                changed[0xE], changed[0xF] = priority, core
+                with self.subTest(priority=priority, core=core):
+                    verify_self_authored_fixture(build_nso(), bytes(changed))
+
+    def test_changed_thread_capability_mask_is_refused(self):
+        # Wrong descriptor type, inverted priority range, kernel priorities,
+        # disallowed main core, and a capability outside its ACI0 container.
+        mutations = (
+            (0x580, THREAD_INFO_CAPABILITY ^ 0x8),
+            (0x580, 0x0300FC07),
+            (0x580, 0x030003F7),
+            (0x580, 0x030143F7),
+            (0x530, 0x100),
+            (0x534, 0),
+        )
+        for offset, value in mutations:
+            broken = bytearray(build_extended_npdm())
+            struct.pack_into("<I", broken, offset, value)
+            with self.subTest(offset=offset, value=value), self.assertRaises(ValueError):
+                verify_self_authored_fixture(build_nso(), bytes(broken))
 
     def test_corrupted_header_or_data_hash_is_refused(self):
         base = bytearray(build_nso())

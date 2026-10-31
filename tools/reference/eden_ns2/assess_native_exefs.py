@@ -13,9 +13,34 @@ import re
 
 MESSAGE = "NX2 original extended ExeFS guest reached debug SVC"
 MAX_LOG_SIZE = 20 * 1024 * 1024
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+CLASSIFIED = re.compile(
+    r"Core <Info> core/core\.cpp:\d+:Load: "
+    r"Switch 2 program: using the 12 GiB memory layout"
+)
+GUEST_OUTPUT = re.compile(
+    r"Debug\.Emulated <Info> core/hle/kernel/svc/svc_debug_string\.cpp:\d+:"
+    r"OutputDebugString: " + re.escape(MESSAGE)
+)
+GUEST_EXIT = re.compile(
+    r"Kernel\.SVC <Info> core/hle/kernel/svc/svc_process\.cpp:\d+:"
+    r"ExitProcess: Process \d+ exiting"
+)
+LOADER_FAILURE = re.compile(
+    r"Core <Critical> core/core\.cpp:\d+:Load: Failed to load ROM"
+)
+EXECUTION_FAILURE = re.compile(
+    r"\bassert(?:ion)?\b|ExceptionRaised|Cannot execute instruction at unmapped address|"
+    r"Segmentation fault|\bAborted\b|AddressSanitizer|UndefinedBehaviorSanitizer|runtime error:",
+    re.IGNORECASE,
+)
+
+
+def normalize(raw: bytes) -> str:
+    return ANSI_ESCAPE.sub("", raw.decode("utf-8", "replace")).replace("\0", "[NUL]")
 
 def report(raw: bytes, label: str) -> str:
-    text = raw.decode("utf-8", "replace").replace("\0", "[NUL]")
+    text = normalize(raw)
     lines = text.splitlines()
     print(f"NX2_NATIVE_{label}_LOG_BYTES={len(raw)}")
     print(f"NX2_NATIVE_{label}_LOG_NUL_COUNT={raw.count(bytes([0]))}")
@@ -38,24 +63,35 @@ def assess(valid_raw: bytes, invalid_raw: bytes, valid_rc: int, invalid_rc: int)
     print(f"NX2_NATIVE_INVALID_PROCESS_RC={invalid_rc}")
     good = report(valid_raw, "VALID")
     bad = report(invalid_raw, "INVALID")
-    native_classified = "Switch 2 program: using the 12 GiB memory layout" in good
-    guest_logged = any(
-        MESSAGE in line and "OutputDebugString:" in line and "Debug.Emulated" in line
-        for line in good.splitlines()
-    )
-    invalid_diagnostic = any(t in bad for t in (
-        "Failed to load ROM", "Failed to obtain loader", "Error Description:",
-        "NPDM file has a bad header", "bad ACID header"
-    ))
-    invalid_clean = invalid_rc not in (0,124,137) and invalid_rc>0
-    has_fault = "Cannot execute instruction at unmapped address" in good or "ExceptionRaised(exception" in good
+    classification = CLASSIFIED.search(good)
+    output = GUEST_OUTPUT.search(good)
+    exit_request = GUEST_EXIT.search(good)
+    native_classified = classification is not None
+    guest_logged = output is not None
+    exited_in_order = bool(classification and output and exit_request and
+                           classification.start() < output.start() < exit_request.start())
+    # The negative fixture changes only META magic: an unrelated loader or
+    # initialization failure is not the expected NPDM rejection.
+    invalid_diagnostic = bool(LOADER_FAILURE.search(bad) and
+                              "NPDM file has a bad header" in bad)
+    invalid_executed = bool(GUEST_OUTPUT.search(bad) or GUEST_EXIT.search(bad))
+    invalid_fault = bool(EXECUTION_FAILURE.search(bad))
+    # SDL_APP_FAILURE is 1. A signal or timeout after an error is not rejection.
+    invalid_clean = invalid_rc == 1 and not invalid_fault and not invalid_executed
+    has_fault = bool(EXECUTION_FAILURE.search(good))
+    clean_exit = valid_rc == 0
     print(f"NX2_NATIVE_EXTENDED_CLASSIFIED={int(native_classified)}")
     print(f"NX2_NATIVE_GUEST_ORIGINAL_SVC_OUTPUT={int(guest_logged)}")
     print(f"NX2_NATIVE_GUEST_EXECUTION_FAULT_SEEN={int(has_fault)}")
     print(f"NX2_NATIVE_GUEST_PROCESS_TIMEOUT={int(valid_rc in (124,137))}")
+    print(f"NX2_NATIVE_GUEST_EXIT_SVC_IN_ORDER={int(exited_in_order)}")
+    print(f"NX2_NATIVE_GUEST_PROCESS_EXIT_SUCCESS={int(clean_exit)}")
     print(f"NX2_NATIVE_INVALID_EXPLICIT_DIAGNOSTIC={int(invalid_diagnostic)}")
     print(f"NX2_NATIVE_INVALID_CLEAN_REJECTION={int(invalid_clean)}")
-    ok=native_classified and guest_logged and invalid_diagnostic and invalid_clean
+    print(f"NX2_NATIVE_INVALID_EXECUTED_GUEST={int(invalid_executed)}")
+    print(f"NX2_NATIVE_INVALID_FAULT_SEEN={int(invalid_fault)}")
+    ok=(native_classified and guest_logged and exited_in_order and clean_exit and
+        not has_fault and invalid_diagnostic and invalid_clean)
     print("NX2_NATIVE_EXEFS_GUEST_AND_CONTROL_PASS" if ok else
           "NX2_NATIVE_EXEFS_GUEST_OR_CONTROL_NOT_VERIFIED")
     return ok
