@@ -10,6 +10,12 @@ on:
       - 'tools/reference/eden_ns2/test_make_native_exefs.py'
       - 'tools/reference/eden_ns2/overlay_eden_exit.py'
       - 'tools/reference/eden_ns2/test_overlay_eden_exit.py'
+      - 'tools/reference/eden_ns2/native_sm_probe.S'
+      - 'tools/reference/eden_ns2/native_sm_probe.ld'
+      - 'tools/reference/eden_ns2/make_native_ipc_exefs.py'
+      - 'tools/reference/eden_ns2/test_make_native_ipc_exefs.py'
+      - 'tools/reference/eden_ns2/assess_native_ipc.py'
+      - 'tools/reference/eden_ns2/test_assess_native_ipc.py'
 permissions:
   contents: read
 concurrency:
@@ -31,6 +37,7 @@ jobs:
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_make_native_exefs.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_exefs.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_overlay_eden_exit.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_ipc.py
           echo NX2_NATIVE_EXEFS_UNITS_PASS
       - name: Install frozen Eden command-line build dependencies
         shell: bash
@@ -39,6 +46,7 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
             ccache clang cmake ninja-build autoconf automake libtool pkg-config nasm \
+            binutils-aarch64-linux-gnu \
             g++ git python3 ca-certificates libfmt-dev liblz4-dev nlohmann-json3-dev \
             libzstd-dev libssl-dev zlib1g-dev libboost-dev libboost-fiber-dev \
             libboost-context-dev libxbyak-dev libopus-dev libasound2-dev \
@@ -46,6 +54,15 @@ jobs:
             vulkan-utility-libraries-dev spirv-tools spirv-headers glslang-tools \
             libsdl3-dev libenet-dev libusb-1.0-0-dev libva-dev libvdpau-dev \
             libxext-dev libxkbcommon-dev
+      - name: Verify original ARM64 IPC fixture with a real assembler and linker
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v aarch64-linux-gnu-as
+          command -v aarch64-linux-gnu-ld
+          command -v aarch64-linux-gnu-objcopy
+          aarch64-linux-gnu-as --version
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_make_native_ipc_exefs.py
       - name: Restore bounded frozen-source compiler cache
         uses: actions/cache@v4
         with:
@@ -120,6 +137,16 @@ jobs:
           p.write_bytes(b)
           PY
           echo NX2_NATIVE_EXEFS_PINNED_INPUTS_PASS
+      - name: Assemble the original service-manager request and reply-checking guest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/reference/eden_ns2/make_native_ipc_exefs.py --output "$RUNNER_TEMP/ipc"
+          test "$(sha256sum "$RUNNER_TEMP/ipc/main" | cut -d' ' -f1)" = \
+            97361663c3468646e453632f7febe3a37bd798e6f3fc2af985b793f21d2c3905
+          test "$(sha256sum "$RUNNER_TEMP/ipc/main.npdm" | cut -d' ' -f1)" = \
+            64e25a2e3e37495d75341f9564afa3e6a665f10f94b36ea7e4e3c533b4573148
+          echo NX2_NATIVE_IPC_SOURCE_AUTHORED_INPUT_READY
       - name: Build frozen Eden CLI with the explicit isolated lifecycle repair
         shell: bash
         run: |
@@ -141,10 +168,10 @@ jobs:
           set -euo pipefail
           trial() {
             local which="$1" logfile="$2"
-            local home="$RUNNER_TEMP/xdg-$which"
-            mkdir -p "$home/config" "$home/data" "$home/cache"
-            env HOME="$home" XDG_CONFIG_HOME="$home/config" \
-              XDG_DATA_HOME="$home/data" XDG_CACHE_HOME="$home/cache" \
+            local trial_home="$RUNNER_TEMP/xdg-$which"
+            mkdir -p "$trial_home/config" "$trial_home/data" "$trial_home/cache"
+            env HOME="$trial_home" XDG_CONFIG_HOME="$trial_home/config" \
+              XDG_DATA_HOME="$trial_home/data" XDG_CACHE_HOME="$trial_home/cache" \
               SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
               LIBGL_ALWAYS_SOFTWARE=1 EDEN_NX2_HIDE_WINDOW=1 \
               timeout --signal=TERM --kill-after=4s 15s \
@@ -156,11 +183,20 @@ jobs:
           bad_rc=$?
           trial valid "$RUNNER_TEMP/native-valid.log"
           good_rc=$?
-          set -e
+          trial ipc "$RUNNER_TEMP/native-ipc.log"
+          ipc_rc=$?
           python3 tools/reference/eden_ns2/assess_native_exefs.py \
             --valid-log "$RUNNER_TEMP/native-valid.log" \
             --invalid-log "$RUNNER_TEMP/native-invalid.log" \
             --valid-exit "$good_rc" --invalid-exit "$bad_rc"
+          baseline_check=$?
+          python3 tools/reference/eden_ns2/assess_native_ipc.py \
+            --log "$RUNNER_TEMP/native-ipc.log" --exit "$ipc_rc"
+          ipc_check=$?
+          set -e
+          test "$baseline_check" -eq 0
+          test "$ipc_check" -eq 0
+          echo NX2_NATIVE_BASELINE_AND_IPC_CONTROLS_PASS
       - name: Preserve independent original runtime logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -171,3 +207,4 @@ jobs:
           path: |
             ${{ runner.temp }}/native-valid.log
             ${{ runner.temp }}/native-invalid.log
+            ${{ runner.temp }}/native-ipc.log
