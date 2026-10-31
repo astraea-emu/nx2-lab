@@ -2,11 +2,17 @@
 
 **Independent, clean-room Nintendo Switch 2 security research and emulation foundations.**
 
-> **Status (2026-10-30): not a Switch 2 emulator, jailbreak or game runner.**
-> The pinned original HBLauncher **custom HBX ABI** stage-1 `_start` executed
-> 795 AArch64 instructions under a research Dynarmic adapter, with verified
-> guest memory effects and QEMU return parity. This is **not** Nintendo
-> Horizon, Switch 2-specific native execution or a guest-produced game frame.
+> **Status (2026-10-31): emulator-runtime qualification in progress.**
+> NX2 has independently exercised source-authored Switch 1-format homebrew in
+> external runtimes, built Eden-NS2's CPU/HLE/GPU libraries, and reproduced and
+> verified an isolated repair for a native-metadata classification bug.
+> Its synthetic extended-ExeFS guest has now emitted debug output and exited
+> cleanly in the patched Eden runtime, with a terminating malformed-NPDM control.
+> The original ARM64 service-manager IPC extension is awaiting its real runtime
+> result; the corrected combined acceptance is still pending. See [measured
+> results and pending gates](docs/STATUS.md). Production-engine selection remains
+> HOLD. No hardware-backed Switch 2 ABI, guest-produced frame, commercial game
+> support, or exploit is established.
 
 ## Current direction — one evidence-driven gate
 
@@ -25,6 +31,10 @@ untested system-service guesses, or incompatible third-party code. The
 security-research and emulator workstreams are related but **independently gated**.
 
 ## Quick start
+
+These commands build the small **NX2-owned CPU/memory correctness oracle**.
+The external runtime qualification workflows are separate and listed in
+[live status](docs/STATUS.md).
 
 CMake 3.25+ and a C++23 compiler:
 
@@ -59,6 +69,8 @@ No external console, firmware, ROM, keys or exploit are needed.
 - `include/nx2/`, `src/` — bounded, source-owned CPU instruction, guest-memory and owned-image research.
 - `tests/` — positive and negative executable tests.
 - `fixtures/` — source-authored tiny AArch64 words only.
+- `tools/reference/` — source-pinned external-runtime probes, input generators,
+  log assessors and malformed-input checks; external implementations stay outside this tree.
 - `evidence/` — evidence manifests and a strict verifier.
 - `docs/STATUS.md` — live established capabilities versus unknowns.
 - `docs/PLAN.md` — gated research, debugger and emulator priorities.
@@ -78,7 +90,8 @@ No external console, firmware, ROM, keys or exploit are needed.
 5. No blind import of GPL-only emulator code into this MIT-licensed repository.
    Review license provenance before depending on any external engine.
 6. No false playable-game, kernel-exploit or persistent-CFW claims.
-7. CI runs without a console or elevated privileges.
+7. Guest execution uses the ordinary CI runner account, without a console.
+   Build dependencies are installed separately in disposable CI environments.
 
 ## Research direction
 

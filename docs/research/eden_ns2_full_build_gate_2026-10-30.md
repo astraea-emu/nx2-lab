@@ -26,7 +26,31 @@ The follow-up workflow verifies that source file's original Git blob `94e841e8ea
 
 The next run **first builds the real `core` and `video_core` targets without suppressing any production source file** (apart from the previously documented cast correction). Only after that succeeds, it verifies exact upstream `src/tests/CMakeLists.txt` blob `ff1168471c5eb45aa54b78892b5f65e03391688f` and omits its single `core/native_gpu_characteristics.cpp` entry in the ephemeral checkout. The reconfigured `tests` target is therefore an explicitly **reduced upstream suite**, not the complete test suite. Other native GPU/graphics supervisor tests remain in their original source form.
 
-If the reduced suite passes, the evidence proves the original integrated libraries build on this toolchain (with one cast patch) and **only the included** native tests pass. The omitted macro-interpreter tests remain a release blocker for a production engine ACCEPT; they need upstream reconciliation against the current API, not an indefinite workaround. If further source/test mismatches arise, preserve the failure and review maintenance costs rather than repeatedly excluding more files.
+If the reduced suite passes, the evidence proves the original integrated libraries build on this toolchain (with one cast patch) and **only the included** native tests pass. The 31 native-GPU cases in the excluded translation unit remain unqualified and block production-engine ACCEPT; the MME API mismatch must be reconciled so that the complete file can run, not kept as an indefinite exclusion. If further source/test mismatches arise, preserve the failure and review maintenance costs rather than repeatedly excluding more files.
+
+## Coverage clarification — October 31
+
+The exclusion is **one complete test translation unit**, not 31 MME-only cases.
+The exact frozen
+[`src/tests/core/native_gpu_characteristics.cpp`](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/tests/core/native_gpu_characteristics.cpp)
+(Git blob `b54bd36ee35d433263f0bed967ca111391c03ea2`) contains **31 `TEST_CASE`
+definitions**. Eight explicitly concern MME; the other 23 cover native GPU
+characteristics, memory/layout/kind handling, QMD dependency and dispatch
+behavior, vertex-stream state, sparse remapping and root-table handling.
+They were excluded together because MME cases in the same file call obsolete
+interpreter APIs. The remaining 23 were not independently proved incompatible,
+and none of the 31 counts as passed.
+
+The [full-build workflow](../../.github/workflows/p0-eden-ns2-full-build.yml)
+verifies the original `src/tests/CMakeLists.txt` Git blob
+`ff1168471c5eb45aa54b78892b5f65e03391688f` and removes exactly its single
+`core/native_gpu_characteristics.cpp` entry. The
+[NPDM-regression workflow](../../.github/workflows/p0-eden-ns2-npdm-reload.yml)
+reuses that exclusion. No production translation unit is removed. The excluded
+source also sets `EDEN_NATIVE_STRICT=1` in its own static initializer; restoring
+and executing these tests must preserve their strict-mode assumptions. This
+source observation does not establish which environment settings were active
+in other test translation units.
 
 ## Required acceptance
 

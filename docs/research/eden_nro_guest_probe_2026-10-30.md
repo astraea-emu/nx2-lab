@@ -1,10 +1,10 @@
 # Issue #21 — Eden-NS2 bounded source-authored NRO execution experiment
 
-**Status: source-authored Switch 1 NRO execution verified. The labeled return-thunk variant exited naturally and malformed magic was rejected in [run #41223767907](https://github.com/astraea-emu/nx2-lab/actions/runs/41223767907) at commit `09defff733d97b8e33d25714bda2019c3cac2a10`, using the isolated process/SDL lifecycle overlay. The strengthened acceptance below must pass on the new commit before merge.**
+**Status: bounded NRO lifecycle control complete; PR #28 merged. The stricter [run #41229946626](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626) passed at head `3764f74101ad87f3009e7d75d0029d66cd4b63db`, using the isolated process/SDL lifecycle overlay. The original guest still times out after its return-to-null fault; the labeled return-thunk variant exits naturally; malformed magic is rejected with an ordinary failure exit but a preceding AES-probe assertion. See the final strict-run record below for the exact scope.**
 
 ## Why this probe
 
-The merged [PR #27](https://github.com/astraea-emu/nx2-lab/pull/27) established that Eden-NS2's integrated CPU, loader, Horizon HLE and GPU libraries build (with one narrowly documented upstream Clang cast correction), and that 33 *included* upstream graphics-related test cases pass. That does **not** establish guest execution. The original 31 stale macro-interpreter cases remain unresolved.
+The merged [PR #27](https://github.com/astraea-emu/nx2-lab/pull/27) established that Eden-NS2's integrated CPU, loader, Horizon HLE and GPU libraries build (with one narrowly documented upstream Clang cast correction), and that 33 *included* upstream graphics-related test cases pass. That does **not** establish guest execution. The 31 cases in one excluded native-GPU test translation unit remain unqualified because its MME tests use obsolete APIs; [eight are MME-related and 23 cover other GPU behavior](eden_ns2_full_build_gate_2026-10-30.md).
 
 The next real gate is to execute a source-authored ARM64 homebrew application through the **actual integrated Eden command-line process**, instead of another isolated header test. Eden includes an NRO loader and an SDL3 null-renderer command-line frontend, so a zero-proprietary-data attempt is possible.
 
@@ -77,8 +77,28 @@ To test this while preserving original source provenance, the next revision appl
 
 This establishes a successful bounded lifecycle experiment for the **patched frozen Eden build**. It does not establish a successful unmodified NRO return path or independently qualify every part of the overlay. Replaying the raw artifact (SHA-256 `6e1b9afbdd9982b386daee5066dbf966119bea30c2b2dc173c8a1bd8e0179fdb`) also exposed `core/crypto/aes_util.cpp:97` asserting `EVP_CipherInit_ex2` during malformed-magic identification. Frozen [`loader.cpp`](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/loader/loader.cpp) probes NCA after NRO magic fails, before filename fallback selects the NRO loader. The control therefore proves rejection and ordinary failure exit, **not assertion-free malformed-input handling**. This diagnostic remains visible and requires separate loader robustness work; it does not occur in the successfully adapted guest.
 
-Review found that the old workflow printed the adapted return code without requiring it and accepted any positive malformed-input status except 124/137. Thus a future timeout after guest output or a crash after a loader diagnostic could have appeared green. The revised workflow uses a separately tested `assess_adapted_nro.py`, requires natural adapted exit plus the real ExitProcess event, and rejects faults/assertions. `assess_eden_guest.py` now checks genuine debug-SVC provenance and requires exact negative-control status 1. Unit regressions include the previously observed exit-then-timeout behavior, loader-error-then-crash, host marker echoes, missing ExitProcess, incorrect computation, and the native experiment's priority assertion shape. Existing source hashes, guest bytes and lifecycle overlay remain unchanged. New CI must still run on this stricter revision; the successful previous run is evidence for its own commit.
+Review found that the old workflow printed the adapted return code without requiring it and accepted any positive malformed-input status except 124/137. Thus a future timeout after guest output or a crash after a loader diagnostic could have appeared green. The revised workflow uses a separately tested `assess_adapted_nro.py`, requires natural adapted exit plus the real ExitProcess event, and rejects faults/assertions. `assess_eden_guest.py` now checks genuine debug-SVC provenance and requires exact negative-control status 1. Unit regressions include the previously observed exit-then-timeout behavior, loader-error-then-crash, host marker echoes, missing ExitProcess, incorrect computation, and the native experiment's priority assertion shape. Existing source hashes, guest bytes and lifecycle overlay remain unchanged. The previous successful run remains evidence for its own commit; the stricter revision subsequently passed in the independent run recorded below.
+
+## Final strict-run acceptance — October 31
+
+[Run #41229946626](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626)
+passed the strengthened runtime acceptance at PR head
+`3764f74101ad87f3009e7d75d0029d66cd4b63db`. All seven checks for that head passed,
+and [PR #28](https://github.com/astraea-emu/nx2-lab/pull/28) merged as
+[`79186b80102555f7362a178d68fab7ef21e0e274`](https://github.com/astraea-emu/nx2-lab/commit/79186b80102555f7362a178d68fab7ef21e0e274).
+
+| Control | Final measured result | Scope |
+| --- | --- | --- |
+| Exact original NRO | Guest computations observed; return-to-null fault; status **124** | Original instruction execution, not natural completion |
+| Labeled four-byte return-thunk variant | Ordered guest computations, genuine `ExitProcess`, no execution faults/assertions, status **0** | Successful bounded lifecycle in the patched frozen runtime |
+| Corrupted-magic NRO | Typed loader rejection, no guest output, status **1**, preceding AES-probe assertion | Terminating rejection, not assertion-free loader handling |
+
+This closes the NRO lifecycle control. It does not repair the original guest's
+return limitation, resolve the malformed-input AES assertion or original loader
+bounds concerns, establish Switch 2-native ABI fidelity, or qualify graphics,
+gameplay or a production runtime. The earlier failed experiments above remain
+evidence of their own source/input revisions.
 
 ## Next engineering decision
 
-If the first CI run fails, read the original launcher or guest service logs and identify the **first specific blocker**. Improve the test only if evidence establishes a safe necessary correction, documenting the entire change. If the original NRO successfully executes, retain this as the frozen Switch 1 homebrew control and proceed to a genuinely Switch 2-facing source-owned image or API contract, with hardware observations as a separate authorized evidence lane. Issue #21 stays HOLD for engine selection until that stronger gate is met.
+Retain the completed NRO experiment as the frozen Switch 1-style homebrew control. The next active workload is the source-authored extended-ExeFS route in [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32); its result must be measured independently. Loader robustness remains open, and hardware observations remain a separate authorized evidence lane. Issue #21 stays HOLD for production-engine selection until its stronger workload, safety and compatibility conditions are met.

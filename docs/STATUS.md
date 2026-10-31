@@ -1,24 +1,167 @@
-# NX2 Lab — Live Status (2026-10-30)
+# NX2 Lab — Live Status (2026-10-31)
 
-## Competitive readiness and next acceptance gate
+## Current objective and scope
 
-NX2 is an **ARM64/homebrew research harness**, **not** a playable Switch 2
-emulator. The source-pinned HBLauncher custom SDK stage-1 route executed
-the original `_start` and recorded 795 ARM64 instruction steps with
-actual guest stack/write effects and QEMU return parity. This is
-**not Nintendo Horizon**, native NSO/NRO support, an NVN2/SM86 GPU
-implementation or a guest-rendered frame.
+The active milestone is [#21: qualify a mature emulator runtime or an
+upstream-first contribution path](https://github.com/astraea-emu/nx2-lab/issues/21).
+**Production-engine decision: HOLD.** NX2 is now evaluating actual external
+CPU/loader/HLE runtime behavior. Its own portable `nx2lab` executable remains a
+small correctness oracle; it is not a standalone Switch 2 game emulator.
 
-The [October 30 architecture audit](COMPETITIVE_ARCHITECTURE_AUDIT_2026-10-30.md)
-identifies mature Eden-derived codebases with new Switch 2-facing
-patches. The **next strategic gate is to qualify a mature executable
-runtime or an upstream contribution path**, rather than keep widening
-the stand-alone HBX fixture. Current stage-2 [issue #20](https://github.com/astraea-emu/nx2-lab/issues/20)
-remains a bounded regression task only. Actual copyright, host
-containment and dependency-license reviews are prerequisites to adopting
-a third-party runtime; no foreign source has been merged.
+The distinction matters: a guest executed by a source-built Eden or NeXo engine
+is real guest-execution evidence, but does not mean NX2's tiny interpreter has
+acquired that engine's functionality. External GPL implementation code stays in
+separate, temporary source builds. NX2's original conformance tools and inputs
+remain in this MIT repository.
 
-## Implemented and tested
+## Established evidence
+
+| Control | Independently measured result | Evidence |
+| --- | --- | --- |
+| NeXo Switch 1-format NRO | Unchanged source-authored homebrew executed through the real loader/CPU/HLE path, completed calculations and exited; malformed images rejected. | [Merged #25](https://github.com/astraea-emu/nx2-lab/pull/25), [runtime CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41092724871) |
+| Eden-NS2 native-facing source contracts | 94 assertions passed in both GNU C++ and Clang with ASan/UBSan against exact original service/GPU header implementations. | [Merged #26](https://github.com/astraea-emu/nx2-lab/pull/26), [contract CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41094596650) |
+| Integrated Eden-NS2 build | CPU/HLE/GPU libraries built with one isolated cast correction; the reduced original suite passed 33 cases / 9,103 assertions. **31 cases in one native-GPU test file remain unbuilt and untested: eight MME cases and 23 other GPU cases.** | [Merged #27](https://github.com/astraea-emu/nx2-lab/pull/27), [build CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41115025130) |
+| NRO fixture preflight | Authentic source-owned NRO accepted and six malformed versions rejected before submission to the research runtime. This does not repair or prove safety of Eden's own loader. | [Merged #29](https://github.com/astraea-emu/nx2-lab/pull/29), [preflight CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41127444547) |
+| Native metadata reload defect | Actual frozen C++ retained `IsSwitch2()` after extended-to-legacy metadata reuse; the baseline failed as expected and a one-line isolated reset passed the regression. | [Merged #30](https://github.com/astraea-emu/nx2-lab/pull/30), [original-source CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41136582253) |
+| Original extended-ExeFS input | Deterministic NX2-authored ARM64 NSO0 plus synthetic extended-ACID NPDM generated without a console SDK or proprietary data. Fixture generation alone proves no execution. | [Merged #31](https://github.com/astraea-emu/nx2-lab/pull/31), [fixture CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41132733015) |
+
+Frozen runtime sources: Eden-NS2
+`e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c`; NeXo
+`7fa73a5062e64370163a248d1a0b555272012c0f`. The exact NeXo original
+`hello.nro` Git blob is `bb0ee2a52acd303e7c800443163aa91900eabb58`.
+All results above are host-side measurements, not physical Switch 2 observations.
+
+## Active execution controls
+
+### Eden NRO lifecycle — merged PR #28
+
+[Stricter runtime run #41229946626](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626)
+observed original guest debug output, data counter, heap sum and Fibonacci
+calculation. The **unchanged** NRO still returned through a missing exit thunk,
+faulted and reached timeout status **124**; it did not exit successfully.
+A separately labeled four-byte exit-thunk adaptation, combined with the audited
+GPL-side process/SDL lifecycle repair, produced guest output and **exit status
+0**. The corrupted-magic input produced an explicit loader error and ordinary
+failure status **1**, but also logged an AES-probe assertion in
+`core/crypto/aes_util.cpp:97` for `EVP_CipherInit_ex2`. This proves terminating
+loader rejection, **not assertion-free malformed-input handling**. The
+[PR #28 lifecycle evidence](research/eden_nro_guest_probe_2026-10-30.md)
+records the assertion found in that run's raw log and the source path that
+probes NCA after NRO magic identification fails. The adapted positive guest
+did not produce this assertion.
+
+[PR #28](https://github.com/astraea-emu/nx2-lab/pull/28) merged as
+`79186b80102555f7362a178d68fab7ef21e0e274` after **all seven checks passed**
+at head `3764f74101ad87f3009e7d75d0029d66cd4b63db`. The stricter run requires
+ordered guest computations, actual `ExitProcess`, status 0 and no assertions or
+execution faults in the adapted guest. The malformed control requires typed
+rejection, status 1 and no guest output; its incidental crypto-probe assertion
+remains explicitly reported. This closes the bounded NRO lifecycle control,
+not production loader safety or the original NRO's return limitation.
+
+### Synthetic extended-ExeFS execution — PR #32
+
+[First runtime run #41224123601](https://github.com/astraea-emu/nx2-lab/actions/runs/41224123601)
+selected Eden's **12 GiB / Switch 2-classified** memory layout and recorded the
+original guest's message through `OutputDebugString`. It nevertheless **failed**:
+the valid input logged a thread-priority assertion and timed out with status
+**124**; the invalid-META input hung with no diagnostic and was killed with
+status **137**.
+
+The synthetic metadata requested priority **0** while its capability admitted
+priorities **16–63**. [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32)
+corrected the fixture to priority **44** and reused the isolated lifecycle
+repair. [Baseline run #41229858618](https://github.com/astraea-emu/nx2-lab/actions/runs/41229858618)
+at head `6c55524` then produced these actual runtime results:
+
+| Control | Observed result |
+| --- | --- |
+| Corrected extended-ExeFS guest | Source-tagged 12 GiB classification, original guest debug output, genuine `ExitProcess`, status **0**, no execution faults/assertions |
+| Corrupted-META input | Status **1**, Core error **4**, Frontend code **0007-0004**, numeric description **4**, no assertions or guest execution |
+
+The workflow nevertheless **failed** because its old log assessor expected an
+English NPDM error description; the frozen runtime emitted the numeric form.
+That is a checker failure after the observed workload results, not a green
+runtime workflow. The corrected assessor requires the complete source-tagged
+error tuple and exactly one ordered classification/output/exit sequence for the
+positive input. It passes the actual archived logs and **26 assessor regression
+tests**. Archive replay does not replace a fresh run of the revised workflow.
+
+Current PR head
+[`6adfaada80f9afdea3175629d8f5d144d5c6cd34`](https://github.com/astraea-emu/nx2-lab/commit/6adfaada80f9afdea3175629d8f5d144d5c6cd34)
+includes that correction, current main, and the original service-manager IPC
+guest. It also saves the compiler cache before runtime trials so that a trial
+failure does not discard the expensive build cache. **112 combined Python tests
+passed locally**; those fixture/checker tests are not real emulator execution.
+The actual combined runtime trial is **PENDING** in
+[run #41233784596](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596).
+Do not claim IPC success or complete PR acceptance from the baseline result,
+archive replay or unit tests.
+
+## Next milestone and decision
+
+Complete the native controls under #21, then record the evidence-based decision
+using [Adaptive Strategy](ADAPTIVE_STRATEGY.md). A successful synthetic
+extended-ExeFS run qualifies only Eden's modeled native-facing loader/CPU path;
+it does not warrant production-engine ACCEPT by itself.
+
+An original ARM64 extension of the **same source-owned ExeFS** is now under
+real service-manager trial in run #41233784596. It initializes `sm:`, obtains a
+`set` service handle, checks the empty-name error, closes both handles, and
+reports fields read from its own reply memory. **Actual IPC success remains
+pending.** The negative service request is structurally valid with an invalid
+name, not malformed HIPC data.
+
+If that runtime gate passes, the next primary slice is **strict native-GPU
+qualification**, before selecting a guest frame workload. Restore the excluded
+native-GPU test translation unit with exact-source guards and preserved
+assertions. Source review identifies 24 cases that do not use the stale
+interpreter interface and five cases with bounded compatibility adaptations.
+Those 29 cases are restoration candidates, not full-runtime passes. Two DMA
+cases require a separate contract decision: DMA moved into the caller, and
+its current size policy differs from the old tests. Preserve both unresolved
+expectations instead of weakening them to obtain green CI.
+The [reconciliation audit](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
+records all 31 case identities, exact source blobs, the five compatibility
+adaptations, and both remaining DMA contracts.
+
+Set `EDEN_NATIVE_STRICT=1` explicitly for that qualification. The frozen
+[QMD scheduler](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/video_core/native_qmd.h)
+can otherwise mark unsupported shader dispatch as completed. Neither a
+completed semaphore nor an acquired service handle proves rendered pixels.
+The later frame gate requires a selected guest graphics/display path and
+independently checked image readback. Switch 2 ABI fidelity still requires
+independent hardware observations or authoritative public ABI evidence. Keep
+the small standalone interpreter as a correctness oracle.
+
+Engine acceptance also still requires resolution of the 31 omitted GPU cases,
+the malformed-NRO AES-probe assertion, original loader bounds checks with
+sanitizer-backed regression, dependency and license review, containment, and
+relevant host-platform qualification. A synthetic emulator-derived metadata
+model is not a hardware ABI oracle.
+
+## Capability limits
+
+- No hardware-backed Switch 2 ABI or native device observation; no exploit,
+  console-side probe or firmware acquisition has been performed by this work.
+- No guest-produced graphical frame, commercial-game compatibility, or
+  full Switch 2 graphics/OS implementation has been established.
+- The bounded NX2 tools generate/check selected NRO/NSO/NPDM test structures;
+  the `nx2lab` executable itself still accepts only NX2OWNED images. It does
+  not load Nintendo games or provide a full NRO/NSO/NCA/XCI loader.
+- Core NX2 CI covers Linux, Windows and macOS. The external integrated runtime
+  evidence above is from Linux; it does not prove Eden works on Apple Silicon.
+- NRO preflight constrains known test inputs. It is not a hostile-input sandbox
+  or a substitute for correcting the original third-party parser.
+
+## Earlier independent groundwork
+
+The following CPU/HBX results remain useful regression evidence. They are not
+the current primary product milestone. HBLauncher stage 2
+([#20](https://github.com/astraea-emu/nx2-lab/issues/20)) stays a bounded secondary
+regression under the current architecture decision.
+
+### NX2-owned CPU and memory oracle
 
 - Portable, bounded, source-owned AArch64 CPU sample: 64-bit MOVZ and ADD
   immediate (excluding unmodelled SP forms), NOP and pre-retirement BRK.
@@ -83,24 +226,16 @@ a third-party runtime; no foreign source has been merged.
   executable image with strict header/count/entry validation, and four
   SHA-256 evidence manifests. Thirteen local CTest groups pass on Linux.
 
-## Not implemented
+### Dated ecosystem context
 
-- Any Nintendo format parser (NSO/NRO/NCA/XCI), Switch 2 memory manager,
-  CPU extensions, real ABI, Horizon process loader,
-  kernel/Horizon implementation, HIPC, GPU, graphics, input, sound, saves,
-  game compatibility, console-side probe, any jailbreak or firmware handling.
-- Full Switch 2 / Horizon device ABI, runtime and commercial compatibility still require independent evidence. GitHub's core Linux/Windows/macOS/sanitizer CI was repaired and passed on main (PR #1).
+See the [October 30 architecture audit](COMPETITIVE_ARCHITECTURE_AUDIT_2026-10-30.md)
+for the source-based candidate comparison. The
+[competitive radar](../.github/workflows/competitive-radar.yml) tracks selected
+repository metadata; neither a new commit nor a self-reported screenshot is
+independent compatibility evidence. Its scope and review triggers are defined
+in [Adaptive Strategy](ADAPTIVE_STRATEGY.md).
 
-## Current public landscape
-
-- Original ns2jb: https://gitlab.com/pepsipu/ns2jb — research-only,
-  tethered; no kernel access/persistent CFW demonstrated.
-- oboromi: https://github.com/0xNikilite/oboromi — Rust Switch 2 emulator
-  foundation; publicly says no commercial games or firmware run.
-- Pound: https://github.com/pound-emu/pound — Switch-family architecture
-  research and Ballistic CPU JIT effort; no published Switch 2 game run.
-
-## E3 verified guest write-effect accounting and binary intake (PR #19)
+### E3 guest write-effect accounting and binary intake (PR #19)
 
 Original source-pinned HBLauncher code now has a **bounded, exact guest
 write-callback ledger**. The direct stage-1 route records 777
@@ -117,7 +252,7 @@ altered/malformed cases. This is bounded source-pinned host research,
 not a Nintendo Horizon ABI, complete architectural effect accounting
 or cryptographic trust in a potentially compromised compiler.
 
-## Original HBX stage-1 guest execution (verified PR #16 exact-head research)
+### Original HBX stage-1 guest execution (PR #16 and later entry tests)
 
 A research-only pinned Dynarmic adapter now attempts to run the original
 HBLauncher `hbx_app_main` AArch64 instructions with an independently prepared,
@@ -148,7 +283,7 @@ magic/version/size (0/2/2/2); 777 original instructions retired in NX2.
 The QEMU comparison is **host-only** and directly enters the C function;
 it does not prove the full `_start` trampoline or real Horizon/device ABI.
 
-## First native-facing independent research target (host-only)
+### Initial HBX host-only reference target
 
 A pinned HBLauncher SDK v3 source revision and original host/QEMU AArch64
 trampoline/runtime tests have a **reproducible opt-in CI lane**.
@@ -159,27 +294,10 @@ Horizon ABI, and not a physical console observation. Accept it as a host-only re
 never promote it to real Switch 2 execution. See
 [research intake](research/hblauncher_host_abi_2026-10-29.md).
 
-## Strategic direction (October 29)
+### Historical strategy checkpoint — October 29
 
-[Evidence-first strategy](STRATEGY_2026-10-29.md) makes a cross-project
-compatibility/conformance corpus the next critical deliverable. The present
-external executable is **Linux ARM64**, not Switch 2 homebrew. No Nintendo
-system service, real hardware ABI, exploit, or game has been reproduced.
-Preserve current CPU tests as an independent correctness oracle and keep
-Dynarmic on HOLD until faults, licensing and host constraints are qualified.
-
-## Next accepted work
-
-1. Freeze a public source/claim matrix for Switch 2 compatibility mode and
-   select one independently reproducible native-facing homebrew input.
-2. Produce a versioned cross-backend trace and conformance runner with
-   positive/negative tests; seek one external contribution or reproducibility
-   review, instead of extending the tiny ARM64 interpreter by default.
-3. Complete the Dynarmic ACCEPT/HOLD/REJECT evidence gate (#2) without
-   publishing untrusted post-fault JIT state.
-4. Keep the six-instruction Linux ELF/mock route as generic research only;
-   do not promote its service returns as Horizon semantics.
-5. Any device/vulnerability experiments require explicit authorization,
-   controlled non-destructive scope and private coordinated disclosure.
-6. Protect main with checks when repository administration permits.
-
+The [October 29 strategy](STRATEGY_2026-10-29.md) proposed a cross-project
+conformance corpus while the external executable was still a generic Linux
+ARM64 fixture. The later NeXo/Eden measurements above supersede that workload
+status. The independent CPU oracle and denied-access tests remain relevant,
+while production backend qualification stays separate from their success.
