@@ -11,6 +11,8 @@ on:
       - 'tools/reference/eden_ns2/test_add_nro_exit_thunk.py'
       - 'tools/reference/eden_ns2/nro_preflight.py'
       - 'tools/reference/eden_ns2/test_nro_preflight.py'
+      - 'tools/reference/eden_ns2/overlay_eden_exit.py'
+      - 'tools/reference/eden_ns2/test_overlay_eden_exit.py'
 
 concurrency:
   group: eden-nro-guest-${{ github.event.pull_request.number || github.ref }}
@@ -38,6 +40,7 @@ jobs:
             -p test_assess_eden_guest.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_add_nro_exit_thunk.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_nro_preflight.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_overlay_eden_exit.py
           echo 'NX2_EDEN_GUEST_LOG_ASSESSOR_UNIT_PASS'
       - name: Install supported Linux compiler and CLI dependencies
         shell: bash
@@ -130,6 +133,12 @@ jobs:
           test "$(stat -c '%s' "$RUNNER_TEMP/nexo/tests/generated/hello.nro")" = 24636
           test -f "$RUNNER_TEMP/nexo/tests/programs/nro_hello/main.c"
           echo 'NX2_SOURCE_AUTHORED_NRO_VERIFIED'
+      - name: Apply source-pinned isolated GPL-side process-exit and unloaded-image lifecycle repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/reference/eden_ns2/overlay_eden_exit.py "$RUNNER_TEMP/eden"
+          echo 'NX2_EDEN_EXIT_REPAIR_ISOLATED_SOURCE_ONLY'
       - name: Compile original Eden command-line emulator and CPU/HLE/GPU libraries
         shell: bash
         run: |
