@@ -130,7 +130,7 @@ def replace_section(body, section):
     if not body:
         return ("# NX2 competitive radar\n\n" + block + "\n\n---\n"
                 "Human notes outside the marked section are preserved.\n"
-                "Changes to the roadmap require [the decision protocol](https://github.com/astraea-emu/nx2-lab/blob/main/docs/ADAPTIVE_STRATEGY.md).\n")
+                "Changes to the roadmap require [the decision protocol](https://github.com/astraea-emu/nx2-lab/blob/main/docs/PLAN.md#how-decisions-change).\n")
     if body.count(START) != 1 or body.count(END) != 1:
         raise RadarError("Refusing to overwrite an issue without unique owned markers")
     begin, finish = body.index(START), body.index(END)

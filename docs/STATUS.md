@@ -1,100 +1,44 @@
-# NX2 Lab — status
+# Status
 
-**Last verified: 2026-10-31. Production-engine decision: HOLD.**
+**Verified 2026-10-31. Production-engine adoption: HOLD.**
 
-The active milestone is [#21: qualify a mature runtime or an upstream
-contribution path](https://github.com/astraea-emu/nx2-lab/issues/21).
-The next guest workload is [native VI2 client lifecycle](PLAN.md).
-NX2's own `nx2lab` executable remains a small correctness oracle; measured
-external-runtime behavior belongs to the separately built engine.
+NX2 is useful as a regression lab. Its own `nx2lab` executable is a bounded
+CPU/memory oracle; the guest results below belong to separately built engines.
+The [active milestone](PLAN.md) is an editable original graphics sample with
+independently checked captured pixels.
 
-## Latest qualification
+## Measured results
 
-[PR #34](https://github.com/astraea-emu/nx2-lab/pull/34)'s
-[strict native run 41245699243](https://github.com/astraea-emu/nx2-lab/actions/runs/41245699243)
-passed at [`3936bc66f7b353ab053e5c12666cf1f37110fe80`](https://github.com/astraea-emu/nx2-lab/commit/3936bc66f7b353ab053e5c12666cf1f37110fe80):
-**62 cases / 25,395 assertions**, process status **0**, with zero failures or
-skips and `EDEN_NATIVE_STRICT=1`. The actual registered and executed inventories
-match **29 restored + 33 existing cases**. The 29 comprise 24 unchanged bodies
-and five compatibility adaptations; **two DMA cases remain excluded and
-unqualified**. The [record](research/eden_native_gpu_test_reconciliation_2026-10-31.md)
-preserves exact source guards, raw reports and the verified artifact digest.
-This accepts the declared native unit-test slice. It does not establish
-guest pixels, the full upstream suite or production-engine suitability.
-
-## Latest guest workload
-
-[PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) merged after all seven
-checks passed at [`6adfaada80f9afdea3175629d8f5d144d5c6cd34`](https://github.com/astraea-emu/nx2-lab/commit/6adfaada80f9afdea3175629d8f5d144d5c6cd34).
-[Runtime run 41233784596](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596)
-executed three independent inputs in the patched frozen Eden build:
-
-| Input | Measured result |
-| --- | --- |
-| Original debug/exit ExeFS | Native-classified 12 GiB layout, original guest message and `ExitProcess` in order; status **0** |
-| Corrupted META | Typed Core error **4** / Frontend **0007-0004** rejection; status **1**; no guest execution |
-| Original service-manager guest | All **21 observed reply fields** checked by the ARM64 guest, successful initialization and `set` acquisition, expected empty-name error `0x00000c15`, both handles closed, natural exit; status **0** |
-
-No assertion, execution fault or unexpected stub appeared in those three logs.
-The [IPC record](research/eden_native_ipc_runtime_2026-10-31.md) preserves all
-observed values, source and input hashes, the raw artifact digest and limits.
-The [lifecycle record](research/eden_native_exefs_runtime_2026-10-31.md)
-preserves the earlier priority, timeout/rejection and diagnostic-checker
-failures. Those runs remain failed historical experiments.
-
-This establishes shared Horizon-style IPC in a synthetic extended-NPDM process
-on Linux. It does not establish a physical Switch 2 ABI or a graphics result.
-
-## Evidence index
-
-Dated records retain the experiment's scope, source pins, applied changes,
-failures and acceptance criteria. Their historical next steps do not override
-[the current plan](PLAN.md).
-
-| Experiment | Established result and boundary | Record / run |
+| Workload | Observed result | Evidence |
 | --- | --- | --- |
-| NeXo original NRO | Unchanged Switch 1-format homebrew executed its calculations and exited; malformed images rejected. | [#25](https://github.com/astraea-emu/nx2-lab/pull/25) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41092724871) |
-| Eden source contracts | 94 assertions in GNU C++ and Clang ASan/UBSan against original native-facing headers; source-model evidence. | [Record](research/runtime_baseline_eden_ns2_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41094596650) |
-| Earlier integrated baseline | Original reduced suite: **33 cases / 9,103 assertions**, with one 31-case native-GPU file excluded. The later 62-case result is recorded above. | [Record](research/eden_ns2_full_build_gate_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41115025130) |
-| Eden NRO lifecycle | Original input executes but faults on return and times out (**124**); labeled four-byte exit-thunk variant plus lifecycle repair exits (**0**); malformed magic is rejected (**1**) **with an AES-probe assertion**. | [Record](research/eden_nro_guest_probe_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626) |
-| NRO fixture preflight | Authentic input accepted and six mutations rejected before runtime admission; Eden's own parser remains unfixed. | [Record](research/eden_nro_input_preflight_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41127444547) |
-| NPDM reuse | Actual original C++ retains stale `IsSwitch2()` state; the reproduced failure passes after an isolated one-line reset. | [Record](research/eden_ns2_npdm_reload_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41136582253) |
-| Original ExeFS inputs | Deterministic ARM64 NSO0 and synthetic extended NPDM; the later priority correction and actual runtime result are separately recorded. | [Fixture](research/eden_native_exefs_fixture_2026-10-30.md) · [CI](https://github.com/astraea-emu/nx2-lab/actions/runs/41132733015) · [Runtime](research/eden_native_exefs_runtime_2026-10-31.md) |
+| Strict native GPU unit slice | **62 cases / 25,395 assertions**, exit 0, zero failures or skips. **29 restored + 33 existing** cases; two DMA cases remain excluded. | [PR #34](https://github.com/astraea-emu/nx2-lab/pull/34) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41245699243) |
+| Original synthetic ExeFS | Guest message and real `ExitProcess`, exit 0. Malformed META separately rejected with Core error 4 / Frontend 0007-0004, exit 1, before guest execution. | [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
+| Original service-manager guest | All **21 observed reply fields** checked by ARM64 guest code; initialization, `set` acquisition, expected empty-name error `0xc15`, two handles closed and natural exit 0. | [Same runtime run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
+| Eden NRO lifecycle | Original executes but faults on return and times out (124). Labeled four-byte exit-thunk variant plus lifecycle repair exits 0. Malformed input rejects (1) **with an AES assertion**. | [PR #28](https://github.com/astraea-emu/nx2-lab/pull/28) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626) |
 
-Frozen runtime revisions: Eden-NS2
-`e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c`; NeXo
-`7fa73a5062e64370163a248d1a0b555272012c0f`.
-The original NeXo `hello.nro` blob is
-`bb0ee2a52acd303e7c800443163aa91900eabb58`.
-Eden results use the explicitly documented isolated build/lifecycle repairs.
-GPL implementation source stays outside this MIT repository.
+Eden results use revision `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c` with
+explicitly recorded build/lifecycle repairs. The GPU run used
+`EDEN_NATIVE_STRICT=1`; the restored cases comprise 24 unchanged bodies and
+five compatibility adaptations. Compile-time DMA exclusions are outside the
+62-case result. The three ExeFS/IPC inputs produced no assertion, execution
+fault or unexpected stub.
 
-## What remains open
+[Evidence](SOURCES.md) preserves the full records, source/input hashes,
+applied changes, raw-report digests and earlier failures. Dated proposals
+remain historical; [Plan](PLAN.md) defines the current next step.
 
-- **Native GPU and display:** two DMA contracts, production macro/JIT paths,
-  the complete upstream suite and actual guest-produced pixels
-  remain unqualified. The [next workload](PLAN.md) exercises stateful VI2
-  registration and notification delivery before a separately captured image.
-- **Loader robustness:** malformed NRO identification asserts in
-  `core/crypto/aes_util.cpp:97` (`EVP_CipherInit_ex2`). Terminating rejection is
-  not assertion-free parsing. Original loader bounds also need a verified fix
-  and sanitizer-backed regression; preflight is not a sandbox.
-- **Production qualification:** dependency/license review, host containment,
-  relevant platform coverage and stronger independent interface evidence
-  remain necessary before adopting an engine.
+## Limits and blockers
 
-Core NX2 CI covers Linux, Windows and macOS. Full external-runtime evidence is
-Linux-only. No physical-console observations, hardware ABI parity,
-guest-produced frame, commercial-game compatibility or exploit is established.
-The local `nx2lab` CLI accepts only NX2OWNED fixtures, not Nintendo formats.
+- **Graphics:** no verified guest-produced frame. Two DMA contracts, production
+  macro/JIT paths and the complete upstream suite remain unqualified.
+- **Loader:** malformed NRO identification asserts in `core/crypto/aes_util.cpp`.
+  Original parser bounds need a verified fix and sanitizer-backed regression;
+  fixture preflight does not contain an untrusted guest.
+- **Production:** dependency/license review, host containment and relevant
+  platform qualification remain open in [#21](https://github.com/astraea-emu/nx2-lab/issues/21).
 
-## Earlier controls and background
-
-| Record | Scope |
-| --- | --- |
-| [CPU reference baseline](research/cpu_reference_baseline_2026-10-31.md) | Generic CPU/memory, Dynarmic and external ELF controls |
-| [HBX host ABI](research/hblauncher_host_abi_2026-10-29.md) and [original guest](research/hblauncher_original_guest_2026-10-29.md) | Custom HBX stage 1, original entry, write accounting and QEMU return parity; stage 2 remains a secondary regression |
-| [October 30 architecture audit](COMPETITIVE_ARCHITECTURE_AUDIT_2026-10-30.md) | Dated candidate comparison and rationale for the external-runtime path |
-| [October 29 strategy](STRATEGY_2026-10-29.md) and [competitive snapshot](COMPETITIVE_RESEARCH_2026-10-29.md) | Historical proposals and project claims; superseded workload status |
-| [Public sources](SOURCES.md) and [compatibility evidence matrix](COMPATIBILITY_EVIDENCE_MATRIX.md) | Dated research leads and confidence categories |
-| [Publication history](PUBLISH.md) | Original repository publication and evidence-byte portability |
+Core CI covers Linux, Windows and macOS; full external-runtime results are
+Linux-only. The synthetic extended-NPDM guests establish source-model IPC,
+not physical Switch 2 ABI fidelity. There are no NX2 console measurements,
+verified commercial-game results or developer SDK. The local CLI accepts
+NX2OWNED fixtures, not Nintendo executable formats.
