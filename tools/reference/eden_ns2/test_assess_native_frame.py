@@ -19,7 +19,7 @@ PREFIX = (b"[   1.000000] Debug.Emulated <Info> "
 CLASSIFIED = (b"[   0.020000] Core <Info> core/core.cpp:321:Load: "
               b"Switch 2 program: using the 12 GiB memory layout\n")
 FRONTEND = (b"[   0.010000] Frontend <Info> "
-            b"yuzu_cmd/emu_window/emu_window_sdl3_vk.cpp:91:EmuWindow_SDL3_VK: "
+            b"yuzu_cmd/emu_window/emu_window_sdl3_vk.cpp:92:EmuWindow_SDL3_VK: "
             b"Eden Version: Eden | HEAD-e2f285ab1e-HEAD (Vulkan)\n")
 RENDERER = (
     b"[   0.200000] Render.Vulkan <Info> video_core/renderer_vulkan/renderer_vulkan.cpp:278:Report: Driver: Mesa 26.0.3\n"
@@ -30,7 +30,7 @@ MANAGER = (b"[   1.100000] Service.VI <Warning> "
            b"core/hle/service/vi/application_display_service.cpp:81:GetManagerDisplayService: "
            b"(STUBBED) called\n")
 QUEUED = (b"[   1.200001] Service.AM <Info> "
-          b"core/hle/service/am/service/graphics_supervisor.cpp:947:QueueNativeImage: "
+          b"core/hle/service/am/service/graphics_supervisor.cpp:948:QueueNativeImage: "
           b"Native image queued for display: image=1, slot=0, fence=4294967295/0, dimensions=16x9\n")
 SUBMITTED = (b"[   1.300000] Service.NVDRV <Info> "
              b"core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:116:Composite: "
@@ -349,9 +349,17 @@ class NativeFrameAssessmentTests(unittest.TestCase):
                     self.assertFalse(self.run_case(GOOD.replace(source, replacement))[0])
         for before, after in ((b"svc_debug_string.cpp", b"fixture_echo.cpp"),
                               (b"nvdisp_disp0.cpp:147", b"nvdisp_disp0.cpp:148"),
-                              (b"graphics_supervisor.cpp:947", b"other.cpp:947")):
+                              (b"graphics_supervisor.cpp:948", b"other.cpp:948")):
             self.assertFalse(self.run_case(GOOD.replace(before, after))[0])
         self.assertFalse(self.run_case(GOOD + b"NX2_FRAME variant=00000000\n")[0])
+
+    def test_multiline_log_calls_require_actual_clang_attribution_not_guessed_first_line(self):
+        # Run 41268051638 captured both complete source records at the closing
+        # invocation lines. Preserve that correction without broadening matches.
+        for actual, guessed in ((b"graphics_supervisor.cpp:948", b"graphics_supervisor.cpp:947"),
+                                (b"emu_window_sdl3_vk.cpp:92", b"emu_window_sdl3_vk.cpp:91")):
+            with self.subTest(guessed=guessed):
+                self.assertFalse(self.run_case(GOOD.replace(actual, guessed))[0])
 
     def test_malformed_unknown_or_interior_control_bytes_are_never_repaired(self):
         for bad in (b"variant=0", b"variant=000000000", b"variant=0x00000000",

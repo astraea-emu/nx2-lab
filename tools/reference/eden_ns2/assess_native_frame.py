@@ -145,8 +145,11 @@ HANDLE_FIELDS = tuple(name + "_handle" for name in
                       ("sm", "applet", "proxy", "window", "self", "gsv", "nvdrv", "vi2"))
 FIELD_RECORD = re.compile(r"NX2_FRAME ([a-z][a-z0-9_]*)=([0-9a-f]{8})")
 MARKERS = ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE")
+# The frozen Clang CI reports the closing lines of these two multiline LOG_INFO
+# invocations (948 and 92), confirmed by the first actual frame artifact. Keep
+# exact file/function/line attribution; the invocation's first line is not a log.
 QUEUED = re.compile(LOG_PREFIX + r"Service\.AM <Info> "
-    r"core/hle/service/am/service/graphics_supervisor\.cpp:947:QueueNativeImage: "
+    r"core/hle/service/am/service/graphics_supervisor\.cpp:948:QueueNativeImage: "
     r"Native image queued for display: image=(\d+), slot=0, fence=4294967295/0, dimensions=16x9")
 SUBMITTED = re.compile(LOG_PREFIX + r"Service\.NVDRV <Info> "
     r"core/hle/service/nvdrv/devices/nvdisp_disp0\.cpp:116:Composite: "
@@ -155,7 +158,7 @@ CAPTURED = re.compile(LOG_PREFIX + r"Service\.NVDRV <Info> "
     r"core/hle/service/nvdrv/devices/nvdisp_disp0\.cpp:147:operator\(\): "
     r"Captured composited frame: 1920x1080, saved=true, nonblack=true")
 FRONTEND = re.compile(LOG_PREFIX + r"Frontend <Info> "
-    r"yuzu_cmd/emu_window/emu_window_sdl3_vk\.cpp:91:EmuWindow_SDL3_VK: "
+    r"yuzu_cmd/emu_window/emu_window_sdl3_vk\.cpp:92:EmuWindow_SDL3_VK: "
     r"Eden Version: .+ \(Vulkan\)")
 RENDERER = re.compile(LOG_PREFIX + r"Render\.Vulkan <Info> "
     r"video_core/renderer_vulkan/renderer_vulkan\.cpp:(278|279|280):Report: "
