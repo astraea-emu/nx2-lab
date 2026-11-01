@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 import build_native_engine as engine
-from test_overlay_eden_exit import fixtures
+from test_overlay_eden_exit import applet_fixtures, fixtures
 
 
 def console_source():
@@ -30,6 +30,7 @@ class EngineTests(unittest.TestCase):
         self.source.mkdir(parents=True)
         svc, frontend = fixtures()
         self.original = dict(zip(engine.overlay_eden_exit.ORIGINAL_BLOBS, (svc, frontend)))
+        self.original.update(zip(engine.overlay_eden_exit.APPLET_BLOBS, applet_fixtures()))
         self.original.update({engine.CAST:
             "for (s32 layer = 0; layer < info.resources.layers; ++layer) {\n" +
             engine.CAST_BEFORE + "\n}\n", engine.LOADER: "enum ResultStatus { Success, ErrorBadNPDMHeader = 4 };\n",
@@ -120,7 +121,9 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(binary, self.build / "bin/eden-cli")
         self.assertFalse(first["reused"])
         modified = first["modified_source_sha256"]
-        self.assertEqual(len(modified), 4)
+        self.assertEqual(set(modified), {*engine.overlay_eden_exit.ORIGINAL_BLOBS,
+                                        *engine.overlay_eden_exit.APPLET_BLOBS,
+                                        engine.CAST, engine.LOGGING})
         mtimes = {name: (source / name).stat().st_mtime_ns for name in modified}
         _, _, second = self.build_engine()
         self.assertTrue(second["reused"])
@@ -147,7 +150,8 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(first["eden_revision"], revision)
             self.assertEqual(first["identity"]["eden_revision"], revision)
             self.assertEqual(set(first["modified_source_sha256"]),
-                             {*engine.overlay_eden_exit.ORIGINAL_BLOBS, engine.LOGGING})
+                             {*engine.overlay_eden_exit.ORIGINAL_BLOBS,
+                               *engine.overlay_eden_exit.APPLET_BLOBS, engine.LOGGING})
             self.assertNotIn(engine.CAST, first["source_diff"])
             self.assertEqual(cast.read_bytes(), original_cast)
             self.assertEqual(cast.stat().st_mtime_ns, cast_mtime)
@@ -194,6 +198,20 @@ class EngineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "blob changed"):
                 self.build_engine()
         self.assertEqual((self.source / engine.LOGGING).read_text(), console_source())
+
+    def test_wrong_applet_blobs_are_refused_before_source_changes_on_both_pins(self):
+        def refused(blobs, revision):
+            for name in engine.overlay_eden_exit.APPLET_BLOBS:
+                with self.subTest(name=name, revision=revision), patch.dict(blobs, {name: "0" * 40}):
+                    before = {path: (self.source / path).read_bytes() for path in self.original}
+                    with self.assertRaisesRegex(ValueError, "blob changed"):
+                        self.build_engine(eden_revision=revision)
+                    self.assertEqual({path: (self.source / path).read_bytes() for path in before}, before)
+                    self.assertEqual(self.commands, [])
+                    self.assertFalse(self.receipt.exists())
+        refused(engine.SOURCE_BLOBS, engine.BASELINE_SHA)
+        with self.candidate_source() as revision:
+            refused(engine.CANDIDATE_BLOBS, revision)
 
     def test_non_overlay_edit_is_found_even_when_git_assumes_unchanged(self):
         self.git("update-index", "--assume-unchanged", "README")
@@ -264,6 +282,45 @@ class EngineTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     self.build_engine()
         self.receipt.write_text(saved)
+
+    def test_receipt_for_early_exit_overlay_is_refused_before_build_or_rewrite(self):
+        deferred = engine.overlay_eden_exit.patch_sources
+        def early_exit(svc, frontend):
+            svc, frontend = deferred(svc, frontend)
+            return svc.replace("    current_process->Exit(system.Kernel());\n",
+                               "    system.Exit();\n    current_process->Exit(system.Kernel());\n"), frontend
+        with patch.object(engine.overlay_eden_exit, "patch_sources", side_effect=early_exit):
+            self.build_engine()
+        path = self.source / "src/core/hle/kernel/svc/svc_process.cpp"
+        source, receipt, commands = path.read_bytes(), self.receipt.read_bytes(), len(self.commands)
+        with self.assertRaisesRegex(ValueError, "source"):
+            self.build_engine()
+        self.assertEqual(path.read_bytes(), source)
+        self.assertEqual(self.receipt.read_bytes(), receipt)
+        self.assertEqual(len(self.commands), commands)
+
+    def test_receipt_without_applet_repair_is_refused_before_build_or_rewrite(self):
+        with patch.object(engine.overlay_eden_exit, "patch_applet_sources", side_effect=lambda *texts: texts):
+            self.build_engine()
+        before = {name: (self.source / name).read_bytes() for name in engine.SOURCE_BLOBS}
+        receipt, commands = self.receipt.read_bytes(), len(self.commands)
+        with self.assertRaisesRegex(ValueError, "source"):
+            self.build_engine()
+        self.assertEqual({name: (self.source / name).read_bytes() for name in before}, before)
+        self.assertEqual(self.receipt.read_bytes(), receipt)
+        self.assertEqual(len(self.commands), commands)
+
+    def test_receipt_with_missing_applet_hashes_is_refused_before_build_or_rewrite(self):
+        self.build_engine()
+        report = json.loads(self.receipt.read_text())
+        for name in engine.overlay_eden_exit.APPLET_BLOBS:
+            report["modified_source_sha256"].pop(name)
+        self.receipt.write_text(json.dumps(report))
+        before, commands = self.receipt.read_bytes(), len(self.commands)
+        with self.assertRaisesRegex(ValueError, "source or build identity changed"):
+            self.build_engine()
+        self.assertEqual(self.receipt.read_bytes(), before)
+        self.assertEqual(len(self.commands), commands)
 
     def test_binary_and_generated_build_configuration_changes_are_refused(self):
         _, binary, _ = self.build_engine()
@@ -406,7 +463,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(fetches), 1)
         self.assertEqual(fetches[0][-1], engine.EDEN_SHA)
         self.assertEqual(self.git("rev-parse", "HEAD").strip(), engine.EDEN_SHA)
-        self.assertEqual(len(engine.check_source(self.source)), 4)
+        self.assertEqual(len(engine.check_source(self.source)), 7)
 
     def test_exact_prepared_source_without_a_receipt_is_not_repatched(self):
         engine.prepare_source(self.source)
