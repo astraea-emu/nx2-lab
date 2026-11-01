@@ -15,8 +15,8 @@ python3 tools/ci/check.py
 ```
 
 This checks local Markdown file targets, builds the core, runs CTest and
-Python/ELF regressions, and assembles the original IPC fixture. It does not
-fetch or execute an external engine. Missing assembler tools fail the check.
+Python/ELF regressions, and assembles the original SM and VI2 guests. It does
+not fetch or execute an external engine. Missing assembler tools fail the check.
 Use `NX2_AARCH64_PREFIX` for a tool prefix other than `aarch64-linux-gnu-`.
 
 `--build-dir PATH` selects a build directory; `--python-only` omits the core

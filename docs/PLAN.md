@@ -13,43 +13,25 @@ The provisional path uses the pinned external Eden runtime in
 and native unit checks support this sample; additional coverage must resolve a
 measured blocker or protect behavior the sample needs.
 
-## Next implementation: VI2 client lifecycle
+## Next implementation: verify a guest-produced frame
 
-Run an original ARM64 guest through `appletOE` → `GraphicsSupervisor` → `VI2`,
-using the frozen [graphics-supervisor implementation](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/service/am/service/graphics_supervisor.cpp).
+The original VI2 guest has passed the lifecycle and notification checks in
+[Status](STATUS.md). Next, register a native image/window pool, bind a display
+layer and present a CPU-filled checkerboard with asymmetric corner markers in
+the supported block layout.
 
-1. Acquire real handles and complete bootstrap. Parse copied/moved handle
-   descriptors and distinct CMIF/TIPC replies correctly: TIPC has a raw result
-   without an `SFCO` header.
-2. Register a nonzero client token with notification slots 2/3. Require success,
-   duplicate-registration refusal, successful unregister and missing-token
-   refusal on repeated unregister.
-3. A writable **127-byte** notification buffer must be rejected without
-   consuming the pending notification. A **128-byte** read must return
-   retirement bit 2 (`0x4`); another 128-byte read must return cleared bits.
-4. The guest checks and reports actual reply values/memory, closes every
-   acquired handle and reaches `ExitProcess` with status 0. Faults, timeouts
-   and unexpected stub/fallback paths fail acceptance.
+Use the pinned engine's existing [on-demand renderer capture](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/service/nvdrv/devices/nvdisp_disp0.cpp)
+with a working Vulkan surface. Fix format, extent, orientation and scaling,
+then compare the fresh capture against an independently generated pixel
+reference. Keep the image backing alive until capture completes, and require
+that completion before guest cleanup and natural exit. Buffer retirement or
+a timed wait alone is not completion evidence.
 
-Record the source-tagged `(STUBBED)` diagnostic from
-[`GetManagerDisplayService`](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/service/vi/application_display_service.cpp)
-explicitly. It constructs a real container-backed manager; obtaining that
-manager does not qualify display output. This known diagnostic allows no
-unrelated fallback success. Passing this control establishes source-model
-service behavior: the first checkpoint toward the image workload below.
-
-## Frame acceptance
-
-Register the native image/window pool, bind a display/layer and present a
-CPU-filled checkerboard with asymmetric corner markers in the supported block
-layout. Add CLI capture using the existing renderer readback path. Fix the
-format, extent, orientation and scaling, then compare captured pixels against
-an independently generated reference. Changing a guest-owned color or pattern must change the observed
-capture; a stale or corrupted capture must fail. Close handles and exit cleanly.
-Retain the source revision, commands, guest/input and capture hashes, and actual
-process results. Completion signals alone cannot establish a frame.
-A pass would qualify this presentation path, not GPU shader execution,
-3D correctness, hardware ABI fidelity or game compatibility.
+Changing a guest-owned color or pattern must change the observed capture;
+a stale or corrupted capture must fail. Retain source revision, commands,
+guest/input and capture hashes, and actual process results. This qualifies a
+presentation path, not GPU shader execution, 3D correctness, hardware ABI
+fidelity or game compatibility.
 
 The excluded DMA contracts need resolution if the sample reaches them.
 Malformed-NRO parsing, host containment and cross-platform runtime coverage

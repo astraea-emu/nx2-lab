@@ -1,6 +1,6 @@
 # Status
 
-**Verified 2026-10-31. Production-engine adoption: HOLD.**
+**Verified 2026-11-01. Production-engine adoption: HOLD.**
 
 NX2 is useful as a regression lab. Its own `nx2lab` executable is a bounded
 CPU/memory oracle; the guest results below belong to separately built engines.
@@ -14,6 +14,7 @@ independently checked captured pixels.
 | Strict native GPU unit slice | **62 cases / 25,395 assertions**, exit 0, zero failures or skips. **29 restored + 33 existing** cases; two DMA cases remain excluded. | [PR #34](https://github.com/astraea-emu/nx2-lab/pull/34) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41245699243) |
 | Original synthetic ExeFS | Guest message and real `ExitProcess`, exit 0. Malformed META separately rejected with Core error 4 / Frontend 0007-0004, exit 1, before guest execution. | [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
 | Original service-manager guest | All **21 observed reply fields** checked by ARM64 guest code; initialization, `set` acquisition, expected empty-name error `0xc15`, two handles closed and natural exit 0. | [Same runtime run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
+| Original VI2 lifecycle guest | **215 observed fields**; duplicate/missing-client refusals; 127-byte rejection without consumption; 128-byte notification `0x4`, then clear; all buffer guards intact, seven handles closed and natural exit 0. | [PR #39](https://github.com/astraea-emu/nx2-lab/pull/39) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41261352557) |
 | Eden NRO lifecycle | Original executes but faults on return and times out (124). Labeled four-byte exit-thunk variant plus lifecycle repair exits 0. Malformed input rejects (1) **with an AES assertion**. | [PR #28](https://github.com/astraea-emu/nx2-lab/pull/28) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626) |
 
 Eden results use revision `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c` with
@@ -23,7 +24,12 @@ five compatibility adaptations. Compile-time DMA exclusions are outside the
 62-case result. The three ExeFS/IPC inputs produced no assertion, execution
 fault or unexpected stub.
 
-[Evidence](SOURCES.md) preserves the full records, source/input hashes,
+The VI2 run recorded five empty-path, one missing-title and three
+uninitialized-network errors before guest entry, plus the one known
+manager-getter warning. Its checker bounds these exact diagnostics by source,
+count and phase; unexpected errors, stubs, faults and timeouts fail acceptance.
+
+[Evidence](SOURCES.md) preserves earlier full records, source/input hashes,
 applied changes, raw-report digests and earlier failures. Dated proposals
 remain historical; [Plan](PLAN.md) defines the current next step.
 
