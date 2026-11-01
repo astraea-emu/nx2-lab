@@ -150,7 +150,7 @@ MARKERS = ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE")
 # exact file/function/line attribution; the invocation's first line is not a log.
 QUEUED = re.compile(LOG_PREFIX + r"Service\.AM <Info> "
     r"core/hle/service/am/service/graphics_supervisor\.cpp:948:QueueNativeImage: "
-    r"Native image queued for display: image=(\d+), slot=0, fence=4294967295/0, dimensions=16x9")
+    r"Native image queued for display: image=(\d+), slot=0, fence=(\d+)/(\d+), dimensions=16x9")
 SUBMITTED = re.compile(LOG_PREFIX + r"Service\.NVDRV <Info> "
     r"core/hle/service/nvdrv/devices/nvdisp_disp0\.cpp:116:Composite: "
     r"Native composite submitted: layers=1, address=(0x[0-9a-f]+)")
@@ -169,14 +169,23 @@ CAPABILITY_FAILURE = re.compile(
     re.IGNORECASE)
 
 
-def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
+def assess_lifecycle(
+    raw: bytes, process_rc: int, variant: int, *, fields=FIELDS,
+    backing_checksums=BACKING_CHECKSUMS, fence_fields: tuple[str, str] | None = None,
+) -> tuple[dict[str, int], list[str], dict[str, int]] | None:
+    """Check the shared source-attributed lifecycle under an explicit field contract.
+
+    The default retains the CPU image's exact checksum and no-fence contract.
+    GPU callers supply their own initial checksum and observed completion fence;
+    they must separately verify GPU execution and the captured pixels.
+    """
     print(f"NX2_NATIVE_FRAME_PROCESS_RC={process_rc}")
     print(f"NX2_NATIVE_FRAME_VARIANT={variant}")
     print(f"NX2_NATIVE_FRAME_LOG_BYTES={len(raw)}")
     print(f"NX2_NATIVE_FRAME_LOG_NUL_COUNT={raw.count(bytes([0]))}")
     if len(raw) > MAX_LOG_SIZE or type(variant) is not int or variant not in (0, 1):
         print("NX2_NATIVE_FRAME_INPUT_NOT_VALID")
-        return False
+        return None
     lines = [BOUNDARY.sub("", line.removesuffix("\r"))
              for line in raw.decode("utf-8", "replace").split("\n")]
     events = {name: [] for name in MARKERS}
@@ -212,7 +221,9 @@ def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
         ):
             match = pattern.fullmatch(line)
             if match:
-                target.append((index, match[1] if match.lastindex else None))
+                value = (tuple(map(int, match.groups())) if pattern is QUEUED else
+                         match[1] if match.lastindex else None)
+                target.append((index, value))
             elif term in line:
                 errors.append(f"malformed or unattributed {term} at line {index}")
         if "NX2_FRAME" not in line:
@@ -246,10 +257,10 @@ def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
         if STUB.search(line) and index not in managers:
             unexpected_stubs.append(index)
     startup_bounded = all(startup_counts[name] <= limit for name, limit, _ in STARTUP_ERRORS)
-    fields_in_order = [name for _, name, _ in records] == [name for name, _ in FIELDS]
+    fields_in_order = [name for _, name, _ in records] == [name for name, _ in fields]
     values = {name: value for _, name, value in records}
     values_match = (all(expected is None or values.get(name) == expected
-                        for name, expected in FIELDS) and
+                        for name, expected in fields) and
                     all(value != 0xFFFFFFFF for value in values.values()))
     handles = [values.get(name, 0) for name in HANDLE_FIELDS]
     valid_handles = (len(set(handles)) == 8 and all(
@@ -259,7 +270,7 @@ def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
     aruid_matches = len(exits) == 1 and aruid != 0 and aruid == exits[0][1]
     image_address = values.get("image_address_lo", 0) | (values.get("image_address_hi", 0) << 32)
     image_observed = (values.get("variant") == variant and
-                      values.get("image_checksum") == BACKING_CHECKSUMS[variant] and
+                      values.get("image_checksum") == backing_checksums[variant] and
                       image_address > 0 and image_address % 4096 == 0 and
                       image_address + 8192 <= 1 << 39 and
                       all(0 < values.get(name, 0) < 0xFFFFFFFF for name in ("memory_id", "image_id")))
@@ -280,7 +291,10 @@ def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
             present_begin < submitted[0][0] < captured[0][0] < cleanup)
         # A successful QueueBuffer can race HWC before its SVC returns. Neither
         # the queue diagnostic nor PRESENTED is ordered against the capture.
-        queue_matches = (int(queued[0][1]) == values.get("image_id") and
+        expected_fence = ((0xFFFFFFFF, 0) if fence_fields is None else
+                          tuple(values.get(name, -1) for name in fence_fields))
+        queue_matches = (queued[0][1][0] == values.get("image_id") and
+                         queued[0][1][1:] == expected_fence and
                          0 < int(submitted[0][1], 16) < 1 << 64)
         version = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", renderer["Vulkan"][0][1])
         renderer_valid = (version is not None and tuple(map(int, version.groups())) >= (1, 1, 0) and
@@ -289,7 +303,7 @@ def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
                           renderer["Vulkan"][0][0] < begin)
     failed = any(FAILURE.search(line) or CAPABILITY_FAILURE.search(line) or
                  "NX2_FRAME_FAILURE" in line for line in lines)
-    for name, _ in FIELDS:
+    for name, _ in fields:
         value = values.get(name)
         print(f"NX2_NATIVE_FRAME_OBSERVED_{name.upper()}=" +
               (f"{value:08x}" if value is not None else "MISSING"))
@@ -319,9 +333,18 @@ def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
                     aruid_matches and image_observed and polls_match and events_in_order and
                     queue_matches and renderer_valid and startup_bounded and not failed and
                     not unexpected_errors and not unexpected_stubs and not errors)
+    if not lifecycle_ok:
+        return None
+    indices = {name: events[name][0] for name in MARKERS}
+    indices.update(QUEUED=queued[0][0], SUBMITTED=submitted[0][0],
+                   CAPTURED=captured[0][0], EXIT=exits[0][0])
+    return values, lines, indices
+
+
+def assess(raw: bytes, process_rc: int, capture: bytes, variant: int) -> bool:
+    lifecycle = assess_lifecycle(raw, process_rc, variant)
     # Avoid repeatedly comparing 8 MiB for a log which already failed closed.
-    pixels_ok = verify_pixels(capture, variant) if lifecycle_ok else False
-    ok = lifecycle_ok and pixels_ok
+    ok = lifecycle is not None and verify_pixels(capture, variant)
     print("NX2_NATIVE_FRAME_GUEST_PIXELS_PASS" if ok else "NX2_NATIVE_FRAME_GUEST_PIXELS_NOT_VERIFIED")
     return ok
 

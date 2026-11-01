@@ -23,9 +23,9 @@ Use `NX2_AARCH64_PREFIX` for a tool prefix other than `aarch64-linux-gnu-`.
 build and CTest. The portable [core quick start](README.md#build-and-run)
 works without a cross-assembler on Linux, Windows and macOS.
 
-Source-backed overlay tests require `NX2_EDEN_SOURCE` pointing to the pinned
-Eden checkout; they explicitly skip locally without it. The GPU workflow
-supplies that source and requires the runtime checks.
+Source-backed tests require `NX2_EDEN_SOURCE` pointing to the pinned Eden
+checkout; they explicitly skip locally without it. The relevant external
+workflows supply that source and require the runtime checks.
 
 ## Original image trial (Linux)
 
@@ -59,6 +59,20 @@ in a new directory under `build/native-frame/`. Use `--engine-dir` and `--output
 to select other locations. Changed engine inputs or an interrupted build require
 a fresh engine directory; existing files are never reset or cleaned. The recipe
 records system package versions but does not provide a hermetic toolchain.
+
+To exercise original guest GPU commands and shaders through the same engine:
+
+```sh
+python3 tools/reference/eden_ns2/run_native_frame.py --gpu-triangle --both
+```
+
+This runs magenta and green triangles plus a clear-only control. It requires
+strict native execution, exact runtime shader bytes, independently calculated
+pixels, saved capture before cleanup and natural exit for all three guests.
+The clear-only image must fail both triangle references. Exit 0 and
+`NX2_ORIGINAL_GPU_TRIANGLE_PASS` identify the complete result. Each fresh output
+directory retains the original input hashes, shader snapshots, captures and logs.
+Current qualification and remaining limits are in [Status](docs/STATUS.md).
 
 ## External-runtime changes
 

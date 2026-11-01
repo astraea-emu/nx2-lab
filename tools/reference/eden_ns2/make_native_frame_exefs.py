@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-"""Assemble the original CPU-image frame guest into a bounded synthetic ExeFS.
+"""Assemble an original CPU-image or GPU-triangle guest into a bounded ExeFS.
 
 Only host GNU AArch64 binutils run here. Real presentation, capture, pixel
 comparison and cleanup require the separate frozen-Eden trial. This retains
@@ -21,6 +21,8 @@ from make_native_exefs import NSO_HEADER, PAGE, build_extended_npdm
 ROOT = Path(__file__).resolve().parent
 SEGMENT_ADDRESSES = (0, 0x2000, 0x5000)
 SEGMENT_SIZES = (0x2000, 0x3000, 0x3000)
+GPU_SEGMENT_ADDRESSES = (0, 0x4000, 0x10000)
+GPU_SEGMENT_SIZES = (0x4000, 0xC000, 0x8000)
 IMAGE_ADDRESS = 0x6000
 IMAGE_SIZE = 8192
 FIELD_COUNT = 281
@@ -38,17 +40,30 @@ MARKERS = tuple(f"NX2_FRAME_{name}\n".encode() for name in (
 
 def compile_frame_segments(
     tool_prefix: str = "aarch64-linux-gnu-", *, variant: int = 0,
+    gpu: bool = False, clear_only: bool = False,
 ) -> tuple[bytes, bytes, bytes]:
     """Link original ARM64 code and validate its three bounded PT_LOAD segments."""
     if variant not in (0, 1):
         raise ValueError("frame variant must be 0 or 1")
+    if type(gpu) is not bool or type(clear_only) is not bool or (clear_only and not gpu):
+        raise ValueError("clear-only requires the GPU workload")
+    addresses, sizes = ((GPU_SEGMENT_ADDRESSES, GPU_SEGMENT_SIZES) if gpu else
+                        (SEGMENT_ADDRESSES, SEGMENT_SIZES))
     with tempfile.TemporaryDirectory(prefix="nx2-frame-guest-") as temporary:
         directory = Path(temporary)
         obj, elf = directory / "guest.o", directory / "guest.elf"
+        source = "native_gpu_probe" if gpu else "native_frame_probe"
+        arguments = []
+        if gpu:
+            from native_gpu_commands import GPFIFO_WORD_COUNT, build_gpu_buffer
+            (directory / "gpu-buffer.bin").write_bytes(build_gpu_buffer(variant, clear_only))
+            arguments = ["-I", str(ROOT), "-I", str(directory), "--defsym",
+                         f"NX2_GPU_WORD_COUNT={GPFIFO_WORD_COUNT}", "--defsym",
+                         f"NX2_GPU_CLEAR_ONLY={int(clear_only)}"]
         subprocess.run([tool_prefix + "as", "--defsym", f"NX2_FRAME_VARIANT={variant}",
-                        "-o", str(obj), str(ROOT / "native_frame_probe.S")], check=True)
+                        *arguments, "-o", str(obj), str(ROOT / (source + ".S"))], check=True)
         subprocess.run([tool_prefix + "ld", "--build-id=none", "-T",
-                        str(ROOT / "native_frame_probe.ld"), "-o", str(elf), str(obj)],
+                        str(ROOT / (source + ".ld")), "-o", str(elf), str(obj)],
                        check=True)
         raw = elf.read_bytes()
         if (len(raw) < 64 or raw[:7] != b"\x7fELF\x02\x01\x01" or
@@ -61,7 +76,7 @@ def compile_frame_segments(
             raise ValueError("expected exactly three ELF program headers")
         sections = []
         for index, (address, limit, flags) in enumerate(zip(
-                SEGMENT_ADDRESSES, SEGMENT_SIZES, (5, 4, 6))):
+                addresses, sizes, (5, 4, 6))):
             kind, actual_flags, start, virtual, physical, size, memory_size, _ = (
                 struct.unpack_from("<IIQQQQQQ", raw, offset + index * entry_size))
             if (kind != 1 or actual_flags != flags or virtual != address or
@@ -72,17 +87,19 @@ def compile_frame_segments(
         return tuple(sections)
 
 
-def build_frame_nso(sections: tuple[bytes, bytes, bytes]) -> bytes:
+def build_frame_nso(sections: tuple[bytes, bytes, bytes], *, gpu: bool = False) -> bytes:
     """Frame-specific fixed bounds; earlier three-page NSO builders stay intact."""
+    addresses, sizes = ((GPU_SEGMENT_ADDRESSES, GPU_SEGMENT_SIZES) if gpu else
+                        (SEGMENT_ADDRESSES, SEGMENT_SIZES))
     if len(sections) != 3 or any(not section or len(section) > limit
-                                 for section, limit in zip(sections, SEGMENT_SIZES)):
+                                 for section, limit in zip(sections, sizes)):
         raise ValueError("expected three nonempty bounded frame segments")
     segments = tuple(section.ljust(limit, b"\0")
-                     for section, limit in zip(sections, SEGMENT_SIZES))
+                     for section, limit in zip(sections, sizes))
     header = bytearray(NSO_HEADER)
     header[:4] = b"NSO0"
     start = NSO_HEADER
-    for index, (segment, address) in enumerate(zip(segments, SEGMENT_ADDRESSES)):
+    for index, (segment, address) in enumerate(zip(segments, addresses)):
         struct.pack_into("<IIII", header, 0x10 + index * 16,
                          start, address, len(segment), PAGE if index < 2 else 0)
         struct.pack_into("<I", header, 0x60 + index * 4, len(segment))
@@ -92,9 +109,11 @@ def build_frame_nso(sections: tuple[bytes, bytes, bytes]) -> bytes:
     return bytes(header) + b"".join(segments)
 
 
-def read_frame_segments(nso: bytes) -> tuple[bytes, bytes, bytes]:
+def read_frame_segments(nso: bytes, *, gpu: bool = False) -> tuple[bytes, bytes, bytes]:
     """Check every fixed mapping, stored size, digest and reserved header byte."""
-    if len(nso) != NSO_HEADER + sum(SEGMENT_SIZES):
+    addresses, sizes = ((GPU_SEGMENT_ADDRESSES, GPU_SEGMENT_SIZES) if gpu else
+                        (SEGMENT_ADDRESSES, SEGMENT_SIZES))
+    if len(nso) != NSO_HEADER + sum(sizes):
         raise ValueError("unexpected frame NSO length")
     if nso[:16] != b"NSO0" + bytes(12):
         raise ValueError("unexpected uncompressed frame NSO header")
@@ -102,7 +121,7 @@ def read_frame_segments(nso: bytes) -> tuple[bytes, bytes, bytes]:
         raise ValueError("unexpected frame NSO reserved metadata")
     sections = []
     start = NSO_HEADER
-    for index, (address, size) in enumerate(zip(SEGMENT_ADDRESSES, SEGMENT_SIZES)):
+    for index, (address, size) in enumerate(zip(addresses, sizes)):
         expected = (start, address, size, PAGE if index < 2 else 0)
         if struct.unpack_from("<IIII", nso, 0x10 + index * 16) != expected:
             raise ValueError("unexpected frame segment mapping or BSS")
@@ -144,11 +163,14 @@ def read_field_names(rodata: bytes) -> tuple[tuple[str, ...], int]:
     raise ValueError("unterminated or oversized frame field stream")
 
 
-def verify_frame_fixture(nso: bytes, npdm: bytes, variant: int) -> None:
+def verify_frame_fixture(nso: bytes, npdm: bytes, variant: int, *,
+                         gpu: bool = False, clear_only: bool = False) -> None:
     """Structural evidence only; no image is supplied or executed by this tool."""
     if variant not in (0, 1):
         raise ValueError("frame variant must be 0 or 1")
-    _, rodata, data = read_frame_segments(nso)
+    if clear_only and not gpu:
+        raise ValueError("clear-only requires the GPU workload")
+    _, rodata, data = read_frame_segments(nso, gpu=gpu)
     names, request_offset = read_field_names(rodata)
     name_bytes = ("\0".join(names) + "\0").encode()
     if (len(names) != FIELD_COUNT or len(set(names)) != FIELD_COUNT or
@@ -158,15 +180,17 @@ def verify_frame_fixture(nso: bytes, npdm: bytes, variant: int) -> None:
     if hashlib.sha256(requests).hexdigest() != REQUEST_SHA256:
         raise ValueError("frame requests differ from independent libnx vectors")
     config = struct.unpack_from("<9I", rodata, request_offset + REQUEST_BYTES)
-    light = 0xFFE0D0C0 if variant == 0 else 0xFFA050E0
+    light = 0xFFE0D0C0 if gpu or variant == 0 else 0xFFA050E0
     if config != (variant, 16, 9, 0xFF302010, light,
                   0xFF0000FF, 0xFF00FF00, 0xFFFF0000, 0xFF00FFFF):
         raise ValueError("frame drawing configuration differs from selected variant")
-    expected_data = bytearray(SEGMENT_SIZES[2])
+    expected_data = bytearray(GPU_SEGMENT_SIZES[2] if gpu else SEGMENT_SIZES[2])
     record_bytes = FIELD_COUNT * 4
     expected_data[:record_bytes] = b"\xff" * record_bytes
     notification_offset = ((record_bytes + 8 * 4 + 15) & ~15) + 12
     expected_data[notification_offset:notification_offset + 136] = b"\xa5" * 136
+    if gpu:
+        _verify_gpu_inputs(rodata, expected_data, variant, clear_only)
     if data != bytes(expected_data):
         raise ValueError("frame data must contain unobserved records and zero image backing")
     for marker in MARKERS:
@@ -176,21 +200,69 @@ def verify_frame_fixture(nso: bytes, npdm: bytes, variant: int) -> None:
         raise ValueError("frame probe must retain the corrected synthetic baseline NPDM")
 
 
+def _verify_gpu_inputs(rodata: bytes, expected_data: bytearray,
+                       variant: int, clear_only: bool) -> None:
+    """Check GPU storage bounds, unobserved records and original input bytes."""
+    from assess_native_gpu_frame import GPU_FIELDS
+    from native_gpu_commands import GPU_BUFFER_SIZE, build_gpu_buffer
+    magic = b"NX2GPUv1"
+    if rodata.count(magic) != 1:
+        raise ValueError("missing or duplicated GPU fixture layout")
+    offset = rodata.index(magic) + len(magic)
+    if offset + 28 > len(rodata):
+        raise ValueError("truncated GPU fixture layout")
+    names_offset, count, record, state, state_size, buffer, inputs = struct.unpack_from(
+        "<7I", rodata, offset)
+    if (count != len(GPU_FIELDS) or not 0 < count <= 512 or
+            record < SEGMENT_SIZES[2] or record + 4 * count > state or
+            state_size < 12 or state + state_size > buffer or buffer % PAGE or
+            buffer + GPU_BUFFER_SIZE > len(expected_data) or inputs % 16 or
+            inputs + GPU_BUFFER_SIZE > len(rodata)):
+        raise ValueError("GPU records, state and command storage overlap or exceed bounds")
+    names = ("\0".join(name for name, _ in GPU_FIELDS) + "\0\0").encode()
+    if rodata[names_offset:names_offset + len(names)] != names:
+        raise ValueError("GPU observed-field order differs from its wire contract")
+    if rodata[inputs:inputs + GPU_BUFFER_SIZE] != build_gpu_buffer(variant, clear_only):
+        raise ValueError("GPU commands, shaders or vertices differ from original inputs")
+    expected_data[record:record + 4 * count] = b"\xff" * (4 * count)
+    expected_data[state:state + 12] = b"\xff" * 12  # Three unopened device FDs.
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--tool-prefix", default="aarch64-linux-gnu-")
     parser.add_argument("--variant", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--gpu-triangle", action="store_true")
+    parser.add_argument("--clear-only", action="store_true",
+                        help="GPU clear control; requires --gpu-triangle")
     args = parser.parse_args()
-    sections = compile_frame_segments(args.tool_prefix, variant=args.variant)
-    nso, npdm = build_frame_nso(sections), build_extended_npdm()
-    verify_frame_fixture(nso, npdm, args.variant)
+    sections = compile_frame_segments(args.tool_prefix, variant=args.variant,
+                                      gpu=args.gpu_triangle, clear_only=args.clear_only)
+    nso, npdm = build_frame_nso(sections, gpu=args.gpu_triangle), build_extended_npdm()
+    verify_frame_fixture(nso, npdm, args.variant, gpu=args.gpu_triangle,
+                         clear_only=args.clear_only)
     args.output.mkdir(parents=True, exist_ok=True)
     for name, content in (("main", nso), ("main.npdm", npdm)):
         (args.output / name).write_bytes(content)
         print(f"NX2_FRAME_FIXTURE variant={args.variant} name={name} bytes={len(content)} "
               f"sha256={hashlib.sha256(content).hexdigest()}")
-    for name in ("native_frame_probe.S", "native_frame_probe.ld"):
+    names = ("native_frame_probe.S", "native_frame_probe.ld")
+    if args.gpu_triangle:
+        names += ("native_gpu_probe.S", "native_gpu_probe.ld", "native_gpu_commands.py")
+        from native_gpu_commands import (
+            FS_OFFSET, GPFIFO_WORD_COUNT, VERTEX_OFFSET, VERTEX_SIZE, VS_OFFSET, build_gpu_buffer,
+        )
+        inputs = build_gpu_buffer(args.variant, args.clear_only)
+        regions = (("allocation", 0, len(inputs)), ("commands", 0, GPFIFO_WORD_COUNT * 4),
+                   ("vertex-shader-page", VS_OFFSET, FS_OFFSET),
+                   ("fragment-shader-page", FS_OFFSET, VERTEX_OFFSET),
+                   ("vertices", VERTEX_OFFSET, VERTEX_OFFSET + VERTEX_SIZE))
+        for name, start, end in regions:
+            content = inputs[start:end]
+            print(f"NX2_GPU_INPUT name={name} bytes={len(content)} "
+                  f"sha256={hashlib.sha256(content).hexdigest()}")
+    for name in names:
         print(f"NX2_FRAME_SOURCE name={name} sha256={hashlib.sha256((ROOT / name).read_bytes()).hexdigest()}")
     print("NX2_FRAME_FIXTURE_GENERATED; guest execution not attempted")
     return 0
