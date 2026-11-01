@@ -8,8 +8,10 @@ import json
 import os
 from pathlib import Path
 import resource
+import re
 import shutil
 import signal
+import struct
 import subprocess
 import time
 
@@ -51,10 +53,75 @@ def engine_descendants(parent: int, executable: Path) -> list[int]:
     return matches
 
 
+def capture_process_state(pid: int, executable: Path, directory: Path, env: dict[str, str]) -> dict:
+    """Retain non-ptrace evidence before a debugger might stall on a core dump."""
+    process = Path(f"/proc/{pid}")
+    if (process / "exe").resolve(strict=True) != executable:
+        raise RuntimeError("diagnostic target changed before process snapshot")
+    result = {}
+    for name in ("maps", "status", "limits"):
+        raw = runner.read_capped(process / name, 1024 * 1024)
+        if len(raw) > 1024 * 1024:
+            raise RuntimeError("process snapshot exceeds its bound")
+        target = directory / ("proc-" + name + ".txt")
+        target.write_bytes(raw)
+        result[name] = {"sha256": digest(target), "bytes": len(raw)}
+    tasks = sorted((process / "task").iterdir(), key=lambda p: int(p.name))
+    if len(tasks) > 512:
+        raise RuntimeError("thread inventory exceeds its diagnostic bound")
+    states = []
+    for task in tasks:
+        try:
+            states.append({"tid": int(task.name),
+                           "status": runner.read_capped(task / "status", 8192).decode(),
+                           "wchan": runner.read_capped(task / "wchan", 256).decode()})
+        except FileNotFoundError:
+            continue
+    (directory / "proc-threads.json").write_text(json.dumps(states, indent=2) + "\n")
+    source = Path(env["XDG_DATA_HOME"]) / "eden/log/eden_log.txt"
+    raw = runner.read_capped(source, FILE_LIMIT).decode("utf-8", "replace") if source.is_file() else ""
+    faults = re.findall(r"Unhandled SIGSEGV at (0x[0-9a-fA-F]+)", raw)
+    if faults:
+        pc = int(faults[-1], 16)
+        matches = []
+        for line in (directory / "proc-maps.txt").read_text().splitlines():
+            fields = line.split(maxsplit=5)
+            if len(fields) != 6 or fields[5] != str(executable) or "x" not in fields[1]:
+                continue
+            start, end = (int(value, 16) for value in fields[0].split("-"))
+            if start <= pc < end:
+                matches.append((line, start - int(fields[2], 16)))
+        result["fault_pc"] = hex(pc)
+        if len(matches) == 1:
+            mapping, bias = matches[0]
+            with executable.open("rb") as stream:
+                header = stream.read(20)
+            if header[:6] != b"\x7fELF\x02\x01":
+                raise RuntimeError("expected the verified little-endian ELF64 executable")
+            kind = struct.unpack_from("<H", header, 16)[0]
+            if kind not in (2, 3):
+                raise RuntimeError("unsupported ELF type for fault symbolization")
+            relative = pc - bias if kind == 3 else pc
+            argv = ["addr2line", "-f", "-C", "-e", str(executable), hex(relative)]
+            symbol = {"mapping": mapping, "load_bias": hex(bias), "elf_type": kind,
+                      "relative_pc": hex(relative), "argv": argv}
+            try:
+                lookup = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                        timeout=5, check=False)
+                symbol.update(returncode=lookup.returncode,
+                              output=lookup.stdout[:16384].decode("utf-8", "replace"),
+                              output_truncated=len(lookup.stdout) > 16384)
+            except subprocess.TimeoutExpired:
+                symbol["timed_out"] = True
+            result["symbolization"] = symbol
+    (directory / "process-snapshot.json").write_text(json.dumps(result, indent=2) + "\n")
+    return result
+
+
 def capture_threads(pid: int, executable: Path, directory: Path) -> dict:
     if Path(f"/proc/{pid}/exe").resolve(strict=True) != executable:
         raise RuntimeError("diagnostic target changed before debugger attachment")
-    argv = ["sudo", "-n", "gdb", "--batch", "--nx", "--nh",
+    argv = ["sudo", "-n", "stdbuf", "-oL", "-eL", "gdb", "--batch", "--nx", "--nh",
             "-iex", "set auto-load off", "-iex", "set debuginfod enabled off",
             "-ex", "set pagination off", "-ex", "info proc mappings", "-ex", "info threads",
             "-ex", "thread apply all bt", "-ex", "detach", "-p", str(pid)]
@@ -65,7 +132,7 @@ def capture_threads(pid: int, executable: Path, directory: Path) -> dict:
         debugger = subprocess.Popen(argv, stdout=stream, stderr=subprocess.STDOUT,
                                     start_new_session=True, preexec_fn=trace_limit)
         try:
-            rc = debugger.wait(timeout=8)
+            rc = debugger.wait(timeout=25)
             timed_out = False
         except subprocess.TimeoutExpired:
             timed_out = True
@@ -107,6 +174,10 @@ def diagnostic_run(command: list[str], directory: Path, env: dict[str, str],
                     matches = engine_descendants(process.pid, executable)
                     diagnostic["matching_pids"] = matches
                     if len(matches) == 1:
+                        try:
+                            diagnostic["snapshot"] = capture_process_state(matches[0], executable, directory, env)
+                        except (OSError, RuntimeError) as error:
+                            diagnostic["snapshot_error"] = str(error)
                         try:
                             diagnostic["trace"] = capture_threads(matches[0], executable, directory)
                         except (OSError, RuntimeError) as error:
@@ -152,7 +223,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trials", type=int, choices=range(1, 21), default=20)
     args = parser.parse_args()
-    for tool in ("gdb", "sudo", "xvfb-run", "xauth", "timeout", "stdbuf"):
+    for tool in ("gdb", "sudo", "xvfb-run", "xauth", "timeout", "stdbuf", "addr2line"):
         if not shutil.which(tool):
             raise SystemExit("missing diagnostic prerequisite: " + tool)
     subprocess.run(["sudo", "-n", "true"], check=True)
