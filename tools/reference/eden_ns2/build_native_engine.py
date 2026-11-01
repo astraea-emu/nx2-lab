@@ -25,7 +25,10 @@ import time
 
 import overlay_eden_exit
 
-EDEN_SHA = "e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c"
+BASELINE_SHA = "e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c"
+CANDIDATE_SHA = "b2cef0c0f2e8517673233e22c929918e2c60e654"
+EDEN_SHA = CANDIDATE_SHA
+EDEN_REVISIONS = (BASELINE_SHA, CANDIDATE_SHA)
 EDEN_REPO = "https://github.com/0x2593/Eden-NS2.git"
 CAST = "src/video_core/texture_cache/util.cpp"
 LOADER = "src/core/loader/loader.h"
@@ -34,6 +37,9 @@ SOURCE_BLOBS = {**overlay_eden_exit.ORIGINAL_BLOBS,
                 CAST: "94e841e8ea4e13beb547ecc1653b5088b770a166",
                 LOADER: "d3c0230cb0637bbd227ba30b703960f0b50ecbb6",
                 LOGGING: "ed12d5253244c1cd464c0a3703e62e412aeda8b6"}
+CANDIDATE_BLOBS = {**SOURCE_BLOBS,
+                   CAST: "cb197563386f76c031d17382ac516fcad73196da",
+                   LOADER: "431aeace7395da49739d468dc65a76958db7865d"}
 CAST_BEFORE = "const u64 segment_begin = u64{layer} * layer_stride + level_offset;"
 CAST_AFTER = "const u64 segment_begin = static_cast<u64>(layer) * layer_stride + level_offset;"
 CONSOLE_WRITES = r'''            std::fwrite(buffer, 1, (std::min)(sizeof(buffer) - 1, result.size), stdout);
@@ -119,17 +125,28 @@ def patch_console_logging(original: str) -> str:
     return before + start + posix.replace(CONSOLE_WRITES, CONSOLE_LOCKED_WRITES) + end + after
 
 
-def inspect_source(root: Path, allow_original: bool = False) -> dict[str, bytes]:
+def revision_sources(eden_revision: str | None) -> tuple[str, dict[str, str]]:
+    revision = EDEN_SHA if eden_revision is None else eden_revision
+    if revision == BASELINE_SHA:
+        return revision, SOURCE_BLOBS
+    if revision == CANDIDATE_SHA:
+        return revision, CANDIDATE_BLOBS
+    raise ValueError("unsupported Eden revision; select one of the two reviewed pins")
+
+
+def inspect_source(root: Path, allow_original: bool = False, *,
+                   eden_revision: str | None = None) -> dict[str, bytes]:
     """Check every tracked byte/mode, not index flags or just Git's dirty status."""
+    revision, blobs = revision_sources(eden_revision)
     root = plain_path(root)
     if Path(os.fsdecode(git(root, "rev-parse", "--show-toplevel")).strip()) != root:
         raise ValueError("Eden source must be the repository root")
-    if git(root, "rev-parse", "HEAD").decode().strip() != EDEN_SHA:
+    if git(root, "rev-parse", "HEAD").decode().strip() != revision:
         raise ValueError("Eden source is not the pinned revision")
     if git(root, "ls-files", "--others", "--exclude-standard", "-z"):
         raise ValueError("unexpected untracked Eden source files")
     tree = {}
-    for entry in git(root, "ls-tree", "-rlz", EDEN_SHA).split(b"\0"):
+    for entry in git(root, "ls-tree", "-rlz", revision).split(b"\0"):
         if entry:
             metadata, name = entry.split(b"\t", 1)
             mode, kind, blob, size = metadata.decode().split()
@@ -139,18 +156,21 @@ def inspect_source(root: Path, allow_original: bool = False) -> dict[str, bytes]
     index = [os.fsdecode(name) for name in git(root, "ls-files", "--cached", "-z").split(b"\0") if name]
     if set(index) != set(tree) or len(index) != len(tree):
         raise ValueError("Git index path inventory differs from the pinned tree")
-    if any(tree.get(name, (None, None))[1] != blob for name, blob in SOURCE_BLOBS.items()):
+    if any(tree.get(name, (None, None))[1] != blob for name, blob in blobs.items()):
         raise ValueError("frozen loader, cast, logging or exit-overlay blob changed")
-    originals = {name: git(root, "show", f"{EDEN_SHA}:{name}") for name in SOURCE_BLOBS}
-    if any(blob_digest(raw) != SOURCE_BLOBS[name] for name, raw in originals.items()):
+    originals = {name: git(root, "show", f"{revision}:{name}") for name in blobs}
+    if any(blob_digest(raw) != blobs[name] for name, raw in originals.items()):
         raise ValueError("original Git object bytes do not match the reviewed blobs")
     svc, frontend = overlay_eden_exit.patch_sources(
         *(originals[name].decode() for name in overlay_eden_exit.ORIGINAL_BLOBS))
     expected = dict(zip(overlay_eden_exit.ORIGINAL_BLOBS, (svc.encode(), frontend.encode())))
     cast = originals[CAST].decode()
-    if cast.count(CAST_BEFORE) != 1 or "for (s32 layer = 0; layer < info.resources.layers; ++layer)" not in cast:
-        raise ValueError("unexpected original cast site")
-    expected[CAST] = cast.replace(CAST_BEFORE, CAST_AFTER).encode()
+    if revision == BASELINE_SHA:
+        if cast.count(CAST_BEFORE) != 1 or "for (s32 layer = 0; layer < info.resources.layers; ++layer)" not in cast:
+            raise ValueError("unexpected original cast site")
+        expected[CAST] = cast.replace(CAST_BEFORE, CAST_AFTER).encode()
+    elif CAST_BEFORE in cast or cast.count(CAST_AFTER) != 1:
+        raise ValueError("candidate does not contain the reviewed upstream cast repair")
     expected[LOGGING] = patch_console_logging(originals[LOGGING].decode()).encode()
     for name, (mode, blob, size) in tree.items():
         path = plain_path(root / name)
@@ -171,8 +191,9 @@ def inspect_source(root: Path, allow_original: bool = False) -> dict[str, bytes]
     return expected
 
 
-def check_source(root: Path) -> dict[str, str]:
-    return {name: hashlib.sha256(raw).hexdigest() for name, raw in inspect_source(root).items()}
+def check_source(root: Path, *, eden_revision: str | None = None) -> dict[str, str]:
+    return {name: hashlib.sha256(raw).hexdigest()
+            for name, raw in inspect_source(root, eden_revision=eden_revision).items()}
 
 
 def ignored_inputs(root: Path) -> dict:
@@ -203,11 +224,12 @@ def ignored_inputs(root: Path) -> dict:
     return {"sha256": combined.hexdigest(), "files": len(names), "bytes": total}
 
 
-def prepare_source(root: Path) -> None:
-    expected = inspect_source(root, allow_original=True)
+def prepare_source(root: Path, *, eden_revision: str | None = None) -> None:
+    revision, _ = revision_sources(eden_revision)
+    expected = inspect_source(root, allow_original=True, eden_revision=revision)
     for name, raw in expected.items():
         path = root / name
-        if bounded_read(path, max(len(raw), int(git(root, "cat-file", "-s", f"{EDEN_SHA}:{name}")))) != raw:
+        if bounded_read(path, max(len(raw), int(git(root, "cat-file", "-s", f"{revision}:{name}")))) != raw:
             path.write_bytes(raw)  # Only exact original bytes passed inspection above.
 
 
@@ -274,8 +296,10 @@ def verify_cache(build: Path, source: Path, options: dict[str, str]) -> None:
         raise ValueError("unexpected CMake configuration; use a new --engine-dir")
 
 
-def build_engine(engine_dir: Path, ccache_dir: Path | None = None) -> tuple[Path, Path, dict]:
+def build_engine(engine_dir: Path, ccache_dir: Path | None = None, *,
+                 eden_revision: str | None = None) -> tuple[Path, Path, dict]:
     started = time.monotonic()
+    revision, _ = revision_sources(eden_revision)
     if sys.platform != "linux":
         raise ValueError("the external engine recipe is qualified on Linux only")
     engine_dir = plain_path(engine_dir)
@@ -290,6 +314,8 @@ def build_engine(engine_dir: Path, ccache_dir: Path | None = None) -> tuple[Path
         previous = json.loads(bounded_read(receipt, 1024**2))
         if not isinstance(previous, dict) or type(previous.get("schema")) is not int or previous["schema"] != 1:
             raise ValueError("invalid engine receipt; use a new --engine-dir")
+        if previous.get("eden_revision") != revision:
+            raise ValueError("engine receipt belongs to another pinned revision; use a new --engine-dir")
     elif build.exists():
         raise ValueError("build directory has no successful receipt; use a new --engine-dir")
     ccache_dir = plain_path(ccache_dir or Path(os.environ.get("CCACHE_DIR", str(engine_dir / "ccache"))))
@@ -299,25 +325,26 @@ def build_engine(engine_dir: Path, ccache_dir: Path | None = None) -> tuple[Path
     options = {**CMAKE_OPTIONS, "CMAKE_C_COMPILER": tools["clang"]["path"],
                "CMAKE_CXX_COMPILER": tools["clang++"]["path"],
                "CMAKE_C_COMPILER_LAUNCHER": "ccache", "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"}
-    identity = {"eden_revision": EDEN_SHA, "source": str(source), "build": str(build),
+    identity = {"eden_revision": revision, "source": str(source), "build": str(build),
                 "helper_sha256": digest(Path(__file__)),
                 "overlay_sha256": digest(Path(overlay_eden_exit.__file__)),
                 "tools": tools, "options": options, "packages": system_packages(),
                 "ccache_dir": str(ccache_dir), "machine": platform.machine(),
                 "path": os.environ.get("PATH", "")}
     if source.exists():
-        inspect_source(source, allow_original=previous is None)
+        inspect_source(source, allow_original=previous is None, eden_revision=revision)
         ignored = ignored_inputs(source)
         if previous is None and ignored["files"]:
             raise ValueError("unverified preexisting ignored engine inputs; use a new --engine-dir")
         if previous and previous.get("ignored_source_inputs") != ignored:
             raise ValueError("ignored dependency or generated source changed; use a new --engine-dir")
     if previous:
-        if previous.get("identity") != identity or previous.get("modified_source_sha256") != check_source(source):
+        if (previous.get("identity") != identity or
+                previous.get("modified_source_sha256") != check_source(source, eden_revision=revision)):
             raise ValueError("engine source or build identity changed; use a new --engine-dir")
         if previous.get("output_sha256") != output_hashes(build, binary):
             raise ValueError("engine binary or configuration changed; use a new --engine-dir")
-        if previous.get("eden_revision") != EDEN_SHA or previous.get("eden_cli_sha256") != previous["output_sha256"]["bin/eden-cli"]:
+        if previous.get("eden_cli_sha256") != previous["output_sha256"]["bin/eden-cli"]:
             raise ValueError("inconsistent engine receipt; use a new --engine-dir")
         verify_cache(build, source, options)
     engine_dir.mkdir(parents=True, exist_ok=True)
@@ -332,10 +359,10 @@ def build_engine(engine_dir: Path, ccache_dir: Path | None = None) -> tuple[Path
         run([tools["git"]["path"], "init", "-q", str(source)], env)
         run([tools["git"]["path"], "-C", str(source), "remote", "add", "origin", EDEN_REPO], env)
         run([tools["git"]["path"], "-C", str(source), "-c", "protocol.version=2", "fetch",
-             "--quiet", "--no-tags", "--depth=1", "--filter=blob:none", "origin", EDEN_SHA], env)
+             "--quiet", "--no-tags", "--depth=1", "--filter=blob:none", "origin", revision], env)
         run([tools["git"]["path"], "-C", str(source), "checkout", "-q", "--detach", "FETCH_HEAD"], env)
-    prepare_source(source)
-    modified = check_source(source)
+    prepare_source(source, eden_revision=revision)
+    modified = check_source(source, eden_revision=revision)
     ccache_dir.mkdir(parents=True, exist_ok=True)
     run([tools["ccache"]["path"], "--max-size=1200M"], env)
     run([tools["ccache"]["path"], "--zero-stats"], env)
@@ -353,7 +380,7 @@ def build_engine(engine_dir: Path, ccache_dir: Path | None = None) -> tuple[Path
          "--parallel", str(allocation["jobs"])], env)
     build_seconds = time.monotonic() - built
     run([tools["ccache"]["path"], "--show-stats"], env)
-    if check_source(source) != modified:
+    if check_source(source, eden_revision=revision) != modified:
         raise ValueError("engine source changed during build")
     if (digest(Path(__file__)) != identity["helper_sha256"] or
             digest(Path(overlay_eden_exit.__file__)) != identity["overlay_sha256"] or
@@ -364,10 +391,10 @@ def build_engine(engine_dir: Path, ccache_dir: Path | None = None) -> tuple[Path
     if previous and outputs["bin/eden-cli"] != previous["eden_cli_sha256"]:
         raise ValueError("incremental build changed the engine binary; use a new --engine-dir")
     report = {"schema": 1, "identity": identity, "receipt": str(receipt),
-              "reused": previous is not None, "eden_revision": EDEN_SHA,
+              "reused": previous is not None, "eden_revision": revision,
               "eden_cli_sha256": outputs["bin/eden-cli"], "modified_source_sha256": modified,
               "source_diff": git(source, "diff", "--no-ext-diff", "--no-textconv",
-                                 EDEN_SHA, "--").decode(),
+                                 revision, "--").decode(),
               "ignored_source_inputs": ignored_inputs(source),
               "output_sha256": outputs, "configure_seconds": round(configure_seconds, 3),
               "build_seconds": round(build_seconds, 3), "resources": allocation,
@@ -387,13 +414,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine-dir", type=Path, default=Path("build/native-engine"))
     parser.add_argument("--ccache-dir", type=Path)
+    parser.add_argument("--eden-revision", choices=EDEN_REVISIONS, default=EDEN_SHA)
     parser.add_argument("--print-packages", action="store_true")
     args = parser.parse_args()
     if args.print_packages:
         print(" ".join(APT_PACKAGES))
         return 0
     try:
-        _, _, report = build_engine(args.engine_dir, args.ccache_dir)
+        _, _, report = build_engine(args.engine_dir, args.ccache_dir, eden_revision=args.eden_revision)
         print("NX2_NATIVE_ENGINE " + json.dumps(report, sort_keys=True), flush=True)
         return 0
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:

@@ -27,9 +27,21 @@ permissions:
 
 jobs:
   bounded-guest:
+    name: NRO controls (${{ matrix.label }})
     runs-on: ubuntu-26.04
     timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: baseline
+            revision: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
+            cache_id: e2f285ab
+          - label: candidate
+            revision: b2cef0c0f2e8517673233e22c929918e2c60e654
+            cache_id: b2cef0c0
     env:
+      EDEN_SHA: ${{ matrix.revision }}
       CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
     steps:
       - name: Checkout NX2 without persistent credentials
@@ -61,9 +73,19 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/eden-cxx-cache
-          key: eden-cli-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
+          key: eden-cli-ubuntu26-clang-${{ matrix.cache_id }}-v1-${{ github.sha }}
           restore-keys: |
+            eden-cli-ubuntu26-clang-${{ matrix.cache_id }}-v1-
             eden-cli-ubuntu26-clang-e2f285ab-v1-
+      - name: Record the private compiler-cache seed
+        shell: bash
+        env:
+          EDEN_CACHE_MATCHED_KEY: ${{ steps.eden-cache.outputs.cache-matched-key }}
+          EDEN_CACHE_EXACT_HIT: ${{ steps.eden-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          echo "NX2_EDEN_CACHE revision=$EDEN_SHA matched_key=$EDEN_CACHE_MATCHED_KEY exact_hit=$EDEN_CACHE_EXACT_HIT" \
+            | tee "$RUNNER_TEMP/nro-cache.txt"
       - name: Obtain independently source-authored Switch 1 homebrew input at exact revision
         env:
           NEXO_SHA: 7fa73a5062e64370163a248d1a0b555272012c0f
@@ -87,7 +109,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/reference/eden_ns2/build_native_engine.py --engine-dir "$RUNNER_TEMP"
+          python3 tools/reference/eden_ns2/build_native_engine.py --engine-dir "$RUNNER_TEMP" \
+            --eden-revision "$EDEN_SHA"
       - name: Preserve compiler objects before guest acceptance
         if: always() && steps.eden-cache.outputs.cache-primary-key != '' && steps.eden-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -137,26 +160,31 @@ jobs:
             --program nx2-source-probe --null-render --singlecore --game "$RUNNER_TEMP/exit-thunk.nro"
           adapted_rc=$?
           set -e
+          printf 'eden_revision=%s\noriginal_exit=%s\nadapted_exit=%s\nmalformed_exit=%s\n' \
+            "$EDEN_SHA" "$good_rc" "$adapted_rc" "$bad_rc" > "$RUNNER_TEMP/nro-status.txt"
           set +e
           python3 tools/reference/eden_ns2/assess_adapted_nro.py \
-            --log "$RUNNER_TEMP/adapted-guest.log" --exit "$adapted_rc"
+            --log "$RUNNER_TEMP/adapted-guest.log" --exit "$adapted_rc" \
+            > "$RUNNER_TEMP/adapted-assessment.txt"
           adapted_check=$?
           python3 tools/reference/eden_ns2/assess_eden_guest.py \
             --good-log "$RUNNER_TEMP/good-guest.log" \
             --bad-log "$RUNNER_TEMP/bad-guest.log" \
-            --good-exit "$good_rc" --bad-exit "$bad_rc"
+            --good-exit "$good_rc" --bad-exit "$bad_rc" \
+            > "$RUNNER_TEMP/original-controls-assessment.txt"
           original_controls=$?
           set -e
+          cat "$RUNNER_TEMP/adapted-assessment.txt" "$RUNNER_TEMP/original-controls-assessment.txt"
           echo "NX2_ADAPTED_CHECK_RC=$adapted_check"
           echo "NX2_ORIGINAL_CONTROLS_RC=$original_controls"
           test "$adapted_check" -eq 0
           test "$original_controls" -eq 0
-          echo 'NX2_EDEN_ORIGINAL_AND_ADAPTED_NRO_ACCEPTED'
+          echo 'NX2_EDEN_NRO_CONTROLS_RECORDED_ORIGINAL_FAILURES_REMAIN_SEPARATE'
       - name: Preserve bounded guest trial logs for independent review
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: eden-nro-guest-logs
+          name: eden-nro-guest-logs-${{ matrix.cache_id }}
           retention-days: 3
           if-no-files-found: ignore
           path: |
@@ -164,3 +192,7 @@ jobs:
             ${{ runner.temp }}/good-guest.log
             ${{ runner.temp }}/bad-guest.log
             ${{ runner.temp }}/adapted-guest.log
+            ${{ runner.temp }}/nro-status.txt
+            ${{ runner.temp }}/nro-cache.txt
+            ${{ runner.temp }}/adapted-assessment.txt
+            ${{ runner.temp }}/original-controls-assessment.txt

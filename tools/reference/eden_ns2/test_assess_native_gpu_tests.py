@@ -10,7 +10,7 @@ import assess_native_gpu_tests
 from assess_native_gpu_tests import EXPECTED_COUNTS, assess, read_report
 from overlay_native_gpu_tests import (
     CATCH2_FILTER, COMBINED_FILTER, COMPATIBLE_CASES, EDEN_COMMIT,
-    EXISTING_SOURCE_SPECS, ORIGINAL_BLOBS, TEST_PATH, UNRESOLVED_CASES,
+    EXISTING_SOURCE_SPECS, ORIGINAL_BLOBS, SOURCE_BLOBS, TEST_PATH, UNRESOLVED_CASES,
 )
 
 
@@ -102,6 +102,17 @@ class GpuReportTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 self.assess()
             self.manifest[key] = original
+
+    def test_reviewed_candidate_requires_its_own_source_guards(self):
+        candidate = next(revision for revision in SOURCE_BLOBS if revision != EDEN_COMMIT)
+        self.manifest["frozen_commit"] = candidate
+        with self.assertRaisesRegex(ValueError, "source identity mismatch"):
+            self.assess()
+        self.manifest["guarded_original_blobs"] = dict(SOURCE_BLOBS[candidate])
+        self.assertEqual(self.assess()["executed_cases"], 62)
+        self.manifest["frozen_commit"] = EDEN_COMMIT
+        with self.assertRaisesRegex(ValueError, "source identity mismatch"):
+            self.assess()
 
     def test_changed_body_or_removed_assertion_fails(self):
         for key, value in (("adapted_body_sha256", "b" * 64),

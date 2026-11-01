@@ -51,10 +51,22 @@ concurrency:
   cancel-in-progress: true
 jobs:
   frozen-cli:
+    name: original-runtime (${{ matrix.engine }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - engine: baseline
+            revision: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
+            cache: e2f285ab
+          - engine: candidate
+            revision: b2cef0c0f2e8517673233e22c929918e2c60e654
+            cache: b2cef0c0
     runs-on: ubuntu-26.04
     timeout-minutes: 55
     env:
       CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
+      EDEN_REVISION: ${{ matrix.revision }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -96,8 +108,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/eden-cxx-cache
-          key: eden-cli-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
+          key: eden-cli-ubuntu26-clang-${{ matrix.cache }}-v1-${{ github.sha }}
           restore-keys: |
+            eden-cli-ubuntu26-clang-${{ matrix.cache }}-v1-
             eden-cli-ubuntu26-clang-e2f285ab-v1-
       - name: Record the restored compiler cache
         shell: bash
@@ -154,7 +167,8 @@ jobs:
           set -euo pipefail
           dpkg-query --show xvfb xauth mesa-vulkan-drivers vulkan-tools libsdl3-0
           python3 tools/reference/eden_ns2/run_native_frame.py \
-            --engine-dir "$RUNNER_TEMP" --output "$RUNNER_TEMP/native-frame" --both \
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-frame" --both \
             | tee "$RUNNER_TEMP/native-frame-first.log"
       - name: Preserve compiler objects even if the image trial failed
         if: always() && steps.eden-cache.outputs.cache-primary-key != '' && steps.eden-cache.outputs.cache-hit != 'true'
@@ -211,7 +225,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/reference/eden_ns2/run_native_frame.py \
-            --engine-dir "$RUNNER_TEMP" --output "$RUNNER_TEMP/native-frame" --both \
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-frame" --both \
             | tee "$RUNNER_TEMP/native-frame-repeat.log"
           python3 - <<'PY'
           import json, os
@@ -222,6 +237,7 @@ jobs:
               raise SystemExit('Expected exactly two fresh image invocations')
           first, repeat = [json.loads(p.read_text()) for p in paths]
           if not (first['verified'] and repeat['verified'] and
+                  first['eden_revision'] == repeat['eden_revision'] == os.environ['EDEN_REVISION'] and
                   not first['engine_reused'] and repeat['engine_reused'] and
                   first['output_directory'] != repeat['output_directory'] and
                   first['eden_cli_sha256'] == repeat['eden_cli_sha256'] and
@@ -234,20 +250,42 @@ jobs:
               'repeat_engine_seconds': repeat['engine_prepare_seconds'],
               'repeat_total_seconds': repeat['total_seconds']}))
           PY
-      - name: Run original native GPU shaders, two triangle colours and the clear-only control
+      - name: Repeat original GPU shaders, both colours and clear-only with verified engine reuse
         shell: bash
         run: |
           set -euo pipefail
           NX2_EDEN_SOURCE="$RUNNER_TEMP/eden" python3 -m unittest discover -v \
             -s tools/reference/eden_ns2 -p test_native_gpu_commands.py
           python3 tools/reference/eden_ns2/run_native_frame.py \
-            --engine-dir "$RUNNER_TEMP" --output "$RUNNER_TEMP/native-gpu" --gpu-triangle --both \
-            | tee "$RUNNER_TEMP/native-gpu.log"
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-gpu" --gpu-triangle --both \
+            | tee "$RUNNER_TEMP/native-gpu-first.log"
+          python3 tools/reference/eden_ns2/run_native_frame.py \
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-gpu" --gpu-triangle --both \
+            | tee "$RUNNER_TEMP/native-gpu-repeat.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'native-gpu'
+          paths = sorted(root.glob('run-*/run-summary.json'))
+          if len(paths) != 2:
+              raise SystemExit('Expected exactly two fresh GPU invocations')
+          first, repeat = [json.loads(p.read_text()) for p in paths]
+          if not (first['verified'] and repeat['verified'] and
+                  first['engine_reused'] and repeat['engine_reused'] and
+                  first['eden_revision'] == repeat['eden_revision'] == os.environ['EDEN_REVISION'] and
+                  first['output_directory'] != repeat['output_directory'] and
+                  first['eden_cli_sha256'] == repeat['eden_cli_sha256'] and
+                  first['variants'] == repeat['variants']):
+              raise SystemExit('Engine reuse or repeated GPU verification failed')
+          print('NX2_GPU_ENGINE_REUSE_AND_REPEAT_PASS')
+          PY
       - name: Preserve independent original runtime logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: original-native-exefs-logs
+          name: original-native-exefs-logs-${{ matrix.engine }}
           retention-days: 3
           if-no-files-found: ignore
           path: |
@@ -271,5 +309,57 @@ jobs:
             ${{ runner.temp }}/native-frame/**/config.ini
             ${{ runner.temp }}/native-frame/**/native-latest-frame.tga
             ${{ runner.temp }}/native-frame/**/guest/main*
-            ${{ runner.temp }}/native-gpu.log
+            ${{ runner.temp }}/native-gpu-first.log
+            ${{ runner.temp }}/native-gpu-repeat.log
             ${{ runner.temp }}/native-gpu/
+
+  compare:
+    name: identical original inputs and pixels
+    needs: frozen-cli
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: original-native-exefs-logs-*
+          path: ${{ runner.temp }}/comparison
+      - name: Compare both revisions and every repeated capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          roots = Path(os.environ['RUNNER_TEMP']) / 'comparison'
+          observed = {}
+          revisions = {'baseline': 'e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c',
+                       'candidate': 'b2cef0c0f2e8517673233e22c929918e2c60e654'}
+          for engine, revision in revisions.items():
+              root = roots / ('original-native-exefs-logs-' + engine)
+              observed[engine] = {}
+              for family, variants in (('native-frame', ('variant-0', 'variant-1')),
+                                       ('native-gpu', ('variant-0', 'variant-1', 'clear-only'))):
+                  runs = sorted((root / family).glob('run-*'))
+                  if len(runs) != 2:
+                      raise SystemExit(f'{engine}/{family}: expected two independent runs')
+                  for run in runs:
+                      summary = json.loads((run / 'run-summary.json').read_text())
+                      provenance = json.loads((run / 'provenance.json').read_text())
+                      if not (summary['verified'] and summary['eden_revision'] == revision and
+                              provenance['eden_revision'] == revision and
+                              provenance['engine']['eden_revision'] == revision):
+                          raise SystemExit(f'{engine}/{family}: incorrect engine or failed run')
+                      for variant in variants:
+                          for file in ('guest/main', 'guest/main.npdm', 'native-latest-frame.tga'):
+                              key = f'{family}/{variant}/{file}'
+                              sha = hashlib.sha256((run / variant / file).read_bytes()).hexdigest()
+                              previous = observed[engine].setdefault(key, sha)
+                              if sha != previous:
+                                  raise SystemExit(f'{engine}/{key}: repeat differs')
+              if len(observed[engine]) != 15:
+                  raise SystemExit('Incomplete original workload comparison')
+          if observed['baseline'] != observed['candidate']:
+              raise SystemExit('The revisions used different original inputs or produced different pixels')
+          print('NX2_ENGINE_COMPARISON ' + json.dumps(observed['baseline'], sort_keys=True))
+          print('NX2_IDENTICAL_INPUTS_AND_PIXELS_PASS')
+          PY

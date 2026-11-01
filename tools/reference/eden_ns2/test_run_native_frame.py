@@ -70,7 +70,7 @@ class NativeFrameEnvironmentTests(unittest.TestCase):
             self.assertEqual(renderer[name], expected)
             self.assertEqual(renderer[name + "\\default"], "false")
         self.assertEqual(config["Miscellaneous"]["log_filter"],
-                         "*:Info HW.GPU:Debug Service.NVDRV:Debug")
+                         "*:Info HW.GPU:Debug Service.NVDRV:Debug Shader:Debug")
         self.assertTrue(GPU_CONFIG.startswith(CONFIG))
 
 

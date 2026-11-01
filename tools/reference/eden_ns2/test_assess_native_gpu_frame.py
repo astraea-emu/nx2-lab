@@ -124,6 +124,19 @@ LOWERED_PAIR = (
 LOWERED = LOWERED_PAIR * 2
 
 
+def candidate_log(log):
+    for before, after in (
+        (b"nvhost_gpu.cpp:370:", b"nvhost_gpu.cpp:379:"),
+        (b"nvhost_gpu.cpp:386:", b"nvhost_gpu.cpp:395:"),
+        (b"draw_manager.cpp:312:", b"draw_manager.cpp:339:"),
+        (b"draw_manager.cpp:320:", b"draw_manager.cpp:347:"),
+        (b"Shader <Info> video_core/shader_environment.cpp:642:",
+         b"Shader <Debug> video_core/shader_environment.cpp:697:"),
+    ):
+        log = log.replace(before, after)
+    return log
+
+
 def good_log(variant=0, clear_only=False):
     fields = [(name, 0x402B5DC5 if name == "image_checksum" else value)
               for name, value in observed_fields(variant)] + gpu_fields(variant, clear_only)
@@ -142,11 +155,12 @@ class TriangleExecutionTests(unittest.TestCase):
         cls.capture = image()
         cls.log = good_log()
 
-    def check(self, log=None, *, capture=None, variant=0, clear_only=False, rc=0):
+    def check(self, log=None, *, capture=None, variant=0, clear_only=False, rc=0,
+              eden_revision=gpu.BASELINE_SHA):
         with contextlib.redirect_stdout(io.StringIO()):
             return gpu.assess(self.log if log is None else log, rc,
                               self.capture if capture is None else capture, variant,
-                              clear_only=clear_only)
+                              clear_only=clear_only, eden_revision=eden_revision)
 
     def changed(self, name, value):
         original = dict(gpu_fields())[name]
@@ -157,6 +171,28 @@ class TriangleExecutionTests(unittest.TestCase):
         self.assertTrue(self.check())
         self.assertTrue(self.check(good_log(1), capture=image(1), variant=1))
         self.assertTrue(self.check(good_log(clear_only=True), capture=image(clear_only=True), clear_only=True))
+
+    def test_candidate_preserves_both_triangles_and_clear_control(self):
+        for variant, clear_only in ((0, False), (1, False), (0, True)):
+            with self.subTest(variant=variant, clear_only=clear_only):
+                self.assertTrue(self.check(candidate_log(good_log(variant, clear_only)),
+                    capture=image(variant, clear_only=clear_only), variant=variant,
+                    clear_only=clear_only, eden_revision=gpu.CANDIDATE_SHA))
+
+    def test_revision_mismatch_mixed_sites_and_old_lowering_level_fail(self):
+        candidate = candidate_log(self.log)
+        self.assertFalse(self.check(candidate))
+        self.assertFalse(self.check(self.log, eden_revision=gpu.CANDIDATE_SHA))
+        for block in (NATIVE_SUBMIT, PUSHBUFFER, DRAW, *STAGES.splitlines(keepends=True),
+                      *LOWERED.splitlines(keepends=True)):
+            with self.subTest(block=block[:60]):
+                mixed = candidate.replace(candidate_log(block), block, 1)
+                self.assertFalse(self.check(mixed, eden_revision=gpu.CANDIDATE_SHA))
+        old_level = candidate.replace(b"Shader <Debug>", b"Shader <Info>")
+        self.assertFalse(self.check(old_level, eden_revision=gpu.CANDIDATE_SHA))
+        for revision in ("0" * 40, "main", "b2cef0c", 0, False):
+            with self.subTest(revision=revision):
+                self.assertFalse(self.check(eden_revision=revision))
 
     def test_cpu_contract_does_not_accept_a_gpu_sentinel_or_observed_fence(self):
         with contextlib.redirect_stdout(io.StringIO()):

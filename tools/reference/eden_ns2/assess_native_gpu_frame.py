@@ -18,6 +18,7 @@ from assess_native_frame import (
     FIELDS as FRAME_FIELDS, HANDLE_FIELDS, assess_lifecycle,
 )
 from assess_native_ipc import GUEST_OUTPUT, LOG_PREFIX, MAX_LOG_SIZE
+from build_native_engine import BASELINE_SHA, CANDIDATE_SHA, EDEN_REVISIONS, EDEN_SHA
 
 BACKGROUND = (16, 32, 48, 255)
 FRAGMENT_COLOURS = ((255, 0, 255, 255), (0, 255, 0, 255))
@@ -133,26 +134,46 @@ GPU_FIELDS = (
     *_cmif("close_as"), *_tipc("memory_destroy", 112), ("gpu_close_sync", 0),
 )
 GPU_MARKERS = ("BEGIN", "SUBMITTED", "FENCE_OBSERVED", "CLEANUP")
-NATIVE_SUBMIT = re.compile(LOG_PREFIX + r"Service\.NVDRV <Debug> "
-    r"core/hle/service/nvdrv/devices/nvhost_gpu\.cpp:370:SubmitGPFIFOImpl: "
-    r"native submit channel=(\d+), initialized=true, entries=1, flags=0x2, fence=0:0")
-PUSHBUFFER = re.compile(LOG_PREFIX + r"Service\.NVDRV <Debug> "
-    r"core/hle/service/nvdrv/devices/nvhost_gpu\.cpp:386:SubmitGPFIFOImpl: "
-    r"native pushbuffer entry=0 raw=(0x[0-9a-f]+), address=(0x[0-9a-f]+), "
-    r"words=149, mapped=true, data=([0-9a-f]{8}(?:,[0-9a-f]{8}){15})")
-TSG = re.compile(LOG_PREFIX + r"Service\.NVDRV <Debug> "
-    r"core/hle/service/nvdrv/devices/nvhost_tsg_gpu\.cpp:47:Ioctl1: "
-    r"native TSG ioctl=0xc004540([12]), input=4, output=4, "
-    r"words=(0x[0-9a-f]+),0x0,0x0,0x0,0x0,0x0,0x0,0x0")
-SHADER_STAGE = re.compile(LOG_PREFIX + r"HW\.GPU <Info> "
-    r"video_core/engines/draw_manager\.cpp:312:ProcessDraw: "
-    r"Native graphics shader stage=(\d+), address=(0x[0-9a-f]+)")
-DRAW = re.compile(LOG_PREFIX + r"HW\.GPU <Debug> "
-    r"video_core/engines/draw_manager\.cpp:320:ProcessDraw: "
-    r"Translating native graphics draw: indexed=false, vertices=3, instances=1")
-LOWERED = re.compile(LOG_PREFIX + r"Shader <Info> "
-    r"video_core/shader_environment\.cpp:642:InitializeNativeCode: "
-    r"Lowered native shader at (0x[0-9a-f]+): (\d+) source bytes, (\d+) instructions")
+
+
+@lru_cache(maxsize=2)
+def native_patterns(eden_revision: str) -> tuple:
+    # Reviewed source sites: Clang attributes a multiline LOG call to its end.
+    # The candidate changes the lowering diagnostic from Info to Debug.
+    submit, pushbuffer, stage, draw, lowered, level = {
+        BASELINE_SHA: (370, 386, 312, 320, 642, "Info"),
+        CANDIDATE_SHA: (379, 395, 339, 347, 697, "Debug"),
+    }[eden_revision]
+    records = (
+        ("submit", r"Service\.NVDRV <Debug> "
+         rf"core/hle/service/nvdrv/devices/nvhost_gpu\.cpp:{submit}:SubmitGPFIFOImpl: "
+         r"native submit channel=(\d+), initialized=true, entries=1, flags=0x2, fence=0:0",
+         "native submit channel="),
+        ("pushbuffer", r"Service\.NVDRV <Debug> "
+         rf"core/hle/service/nvdrv/devices/nvhost_gpu\.cpp:{pushbuffer}:SubmitGPFIFOImpl: "
+         r"native pushbuffer entry=0 raw=(0x[0-9a-f]+), address=(0x[0-9a-f]+), "
+         r"words=149, mapped=true, data=([0-9a-f]{8}(?:,[0-9a-f]{8}){15})",
+         "native pushbuffer entry="),
+        ("tsg", r"Service\.NVDRV <Debug> "
+         r"core/hle/service/nvdrv/devices/nvhost_tsg_gpu\.cpp:47:Ioctl1: "
+         r"native TSG ioctl=0xc004540([12]), input=4, output=4, "
+         r"words=(0x[0-9a-f]+),0x0,0x0,0x0,0x0,0x0,0x0,0x0", "native TSG ioctl="),
+        ("stage", r"HW\.GPU <Info> "
+         rf"video_core/engines/draw_manager\.cpp:{stage}:ProcessDraw: "
+         r"Native graphics shader stage=(\d+), address=(0x[0-9a-f]+)",
+         "Native graphics shader stage="),
+        ("draw", r"HW\.GPU <Debug> "
+         rf"video_core/engines/draw_manager\.cpp:{draw}:ProcessDraw: "
+         r"Translating native graphics draw: indexed=false, vertices=3, instances=1",
+         "Translating native graphics draw:"),
+        ("lowered", rf"Shader <{level}> "
+         rf"video_core/shader_environment\.cpp:{lowered}:InitializeNativeCode: "
+         r"Lowered native shader at (0x[0-9a-f]+): (\d+) source bytes, (\d+) instructions",
+         "Lowered native shader at "),
+    )
+    return tuple((name, re.compile(LOG_PREFIX + pattern), term) for name, pattern, term in records)
+
+
 FIRST_COMMAND_WORDS = (
     0x20010000, 0xC797, 0x20010049, 2, 0x200100DF, 1, 0x200101D1, 0,
     0x200A0200, 1, 0, 16, 9, 0xD5, 0x40, 1,
@@ -162,10 +183,14 @@ GPU_FAILURE = re.compile(
     r"falls back|Native shader (?:paused|resumed|dumped)", re.IGNORECASE)
 
 
-def assess(raw: bytes, process_rc: int, capture: bytes, variant: int, *, clear_only=False) -> bool:
-    if type(clear_only) is not bool:
+def assess(raw: bytes, process_rc: int, capture: bytes, variant: int, *, clear_only=False,
+           eden_revision: str | None = None) -> bool:
+    eden_revision = EDEN_SHA if eden_revision is None else eden_revision
+    if type(clear_only) is not bool or eden_revision not in EDEN_REVISIONS:
         print("NX2_NATIVE_GPU_FRAME_INPUT_NOT_VALID")
         return False
+    print(f"NX2_NATIVE_GPU_FRAME_EDEN_REVISION={eden_revision}")
+    patterns = native_patterns(eden_revision)
     lifecycle = assess_lifecycle(raw, process_rc, variant, fields=FRAME_FIELDS + GPU_FIELDS,
         backing_checksums=(SENTINEL_CHECKSUM,) * 2,
         fence_fields=("gpu_fifo_word03", "gpu_submit_word05"))
@@ -206,14 +231,7 @@ def assess(raw: bytes, process_rc: int, capture: bytes, variant: int, *, clear_o
                 errors.append(f"unattributed or unknown GPU marker at line {index}")
             else:
                 markers[name].append(index)
-        for name, pattern, term in (
-            ("submit", NATIVE_SUBMIT, "native submit channel="),
-            ("pushbuffer", PUSHBUFFER, "native pushbuffer entry="),
-            ("tsg", TSG, "native TSG ioctl="),
-            ("stage", SHADER_STAGE, "Native graphics shader stage="),
-            ("draw", DRAW, "Translating native graphics draw:"),
-            ("lowered", LOWERED, "Lowered native shader at "),
-        ):
+        for name, pattern, term in patterns:
             match = pattern.fullmatch(line)
             if match:
                 proof[name].append((index, match.groups()))
@@ -271,6 +289,7 @@ def main() -> int:
     parser.add_argument("--exit", required=True, type=int, dest="process_rc")
     parser.add_argument("--variant", required=True, type=int, choices=(0, 1))
     parser.add_argument("--clear-only", action="store_true")
+    parser.add_argument("--eden-revision", choices=EDEN_REVISIONS, default=EDEN_SHA)
     args = parser.parse_args()
     try:
         with args.log.open("rb") as stream:
@@ -279,7 +298,8 @@ def main() -> int:
             capture = stream.read(CAPTURE_SIZE + 1)
     except OSError as error:
         parser.exit(1, f"NX2_NATIVE_GPU_FRAME_INPUT_UNAVAILABLE: {error}\n")
-    return 0 if assess(raw, args.process_rc, capture, args.variant, clear_only=args.clear_only) else 1
+    return 0 if assess(raw, args.process_rc, capture, args.variant, clear_only=args.clear_only,
+                       eden_revision=args.eden_revision) else 1
 
 
 if __name__ == "__main__":

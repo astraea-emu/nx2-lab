@@ -50,7 +50,8 @@ class EngineTests(unittest.TestCase):
         self.tools = {name: {"path": "/tools/" + name, "sha256": "a" * 64,
                              "version": "cmake version 3.31.0" if name == "cmake" else "test tool 1"}
                       for name in ("git", "cmake", "ninja", "clang", "clang++", "ccache")}
-        self.patches = [patch.object(engine, "EDEN_SHA", revision),
+        self.patches = [patch.object(engine, "BASELINE_SHA", revision),
+                        patch.object(engine, "EDEN_SHA", revision),
                         patch.object(engine, "SOURCE_BLOBS", blobs),
                         patch.object(engine, "toolchain", return_value=self.tools),
                         patch.object(engine, "system_packages", return_value={"available": False}),
@@ -94,9 +95,24 @@ class EngineTests(unittest.TestCase):
                 binary.write_text("#!/bin/sh\nexit 0\n")
                 binary.chmod(0o755)
 
-    def build_engine(self):
+    def build_engine(self, *, eden_revision=None):
         with contextlib.redirect_stdout(io.StringIO()):
-            return engine.build_engine(self.directory, self.directory / "ccache")
+            return engine.build_engine(self.directory, self.directory / "ccache",
+                                       eden_revision=eden_revision)
+
+    @contextlib.contextmanager
+    def candidate_source(self):
+        (self.source / engine.CAST).write_text(
+            self.original[engine.CAST].replace(engine.CAST_BEFORE, engine.CAST_AFTER))
+        (self.source / engine.LOADER).write_text(self.original[engine.LOADER] + "// candidate loader\n")
+        self.git("add", engine.CAST, engine.LOADER)
+        self.git("-c", "user.name=NX2 test", "-c", "user.email=test@example.invalid",
+                 "commit", "-qm", "synthetic candidate with upstream cast repair")
+        revision = self.git("rev-parse", "HEAD").strip()
+        blobs = {name: self.git("hash-object", name).strip() for name in engine.SOURCE_BLOBS}
+        with patch.object(engine, "CANDIDATE_SHA", revision), \
+             patch.object(engine, "CANDIDATE_BLOBS", blobs):
+            yield revision
 
     def test_original_source_is_patched_once_and_reused_with_an_incremental_build(self):
         source, binary, first = self.build_engine()
@@ -118,10 +134,54 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(any("--max-size=1200M" in command for command in self.commands))
 
     def test_wrong_revision_is_refused_without_source_rewrite(self):
-        with patch.object(engine, "EDEN_SHA", "0" * 40):
-            with self.assertRaisesRegex(ValueError, "pinned revision"):
-                self.build_engine()
+        with self.assertRaisesRegex(ValueError, "pinned revision"):
+            self.build_engine(eden_revision=engine.CANDIDATE_SHA)
         self.assertEqual((self.source / engine.CAST).read_text(), self.original[engine.CAST])
+        self.assertEqual(self.commands, [])
+
+    def test_candidate_keeps_upstream_cast_and_reuses_only_its_own_receipt(self):
+        with self.candidate_source() as revision:
+            cast = self.source / engine.CAST
+            original_cast, cast_mtime = cast.read_bytes(), cast.stat().st_mtime_ns
+            _, _, first = self.build_engine(eden_revision=revision)
+            self.assertEqual(first["eden_revision"], revision)
+            self.assertEqual(first["identity"]["eden_revision"], revision)
+            self.assertEqual(set(first["modified_source_sha256"]),
+                             {*engine.overlay_eden_exit.ORIGINAL_BLOBS, engine.LOGGING})
+            self.assertNotIn(engine.CAST, first["source_diff"])
+            self.assertEqual(cast.read_bytes(), original_cast)
+            self.assertEqual(cast.stat().st_mtime_ns, cast_mtime)
+            with patch.object(engine, "EDEN_SHA", revision):
+                _, _, second = self.build_engine()
+            self.assertTrue(second["reused"])
+            self.assertEqual(second["eden_cli_sha256"], first["eden_cli_sha256"])
+            saved, commands = self.receipt.read_bytes(), len(self.commands)
+            with self.assertRaisesRegex(ValueError, "another pinned revision"):
+                self.build_engine()
+            self.assertEqual(self.receipt.read_bytes(), saved)
+            self.assertEqual(len(self.commands), commands)
+
+    def test_baseline_receipt_cannot_be_reused_for_the_candidate(self):
+        self.build_engine()
+        saved, commands = self.receipt.read_bytes(), len(self.commands)
+        with self.assertRaisesRegex(ValueError, "another pinned revision"):
+            self.build_engine(eden_revision=engine.CANDIDATE_SHA)
+        self.assertEqual(self.receipt.read_bytes(), saved)
+        self.assertEqual(len(self.commands), commands)
+
+    def test_candidate_loader_and_cast_cannot_use_baseline_blobs(self):
+        with self.candidate_source() as revision:
+            for name in (engine.LOADER, engine.CAST):
+                with self.subTest(name=name), \
+                     patch.dict(engine.CANDIDATE_BLOBS, {name: engine.SOURCE_BLOBS[name]}):
+                    with self.assertRaisesRegex(ValueError, "blob changed"):
+                        self.build_engine(eden_revision=revision)
+        self.assertEqual(self.commands, [])
+
+    def test_unreviewed_revision_is_refused_before_build(self):
+        with self.assertRaisesRegex(ValueError, "unsupported Eden revision"):
+            self.build_engine(eden_revision="f" * 40)
+        self.assertFalse(self.receipt.exists())
         self.assertEqual(self.commands, [])
 
     def test_wrong_loader_blob_is_refused(self):

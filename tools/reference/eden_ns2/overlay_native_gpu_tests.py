@@ -16,7 +16,9 @@ from pathlib import Path
 import re
 import subprocess
 
-EDEN_COMMIT = "e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c"
+from build_native_engine import BASELINE_SHA, CANDIDATE_SHA, EDEN_REVISIONS
+
+EDEN_COMMIT = BASELINE_SHA
 TEST_PATH = "src/tests/core/native_gpu_characteristics.cpp"
 CMAKE_PATH = "src/tests/CMakeLists.txt"
 CATCH2_FILTER = "[nx2-native-gpu-restored]"
@@ -45,6 +47,12 @@ ORIGINAL_BLOBS = {
     "src/tests/video_core/native_semaphore.cpp": "98b3e35279daf61228967ff9342e166336a4345b",
     "src/tests/video_core/native_shader.cpp": "998cd438192008368e48862ef550ae075e70955f",
 }
+CANDIDATE_BLOBS = {
+    **ORIGINAL_BLOBS,
+    "src/video_core/macro.cpp": "6cf07cf03908dcfe873c7322247cddc4a8979fec",
+    "src/video_core/engines/maxwell_3d.h": "35ab5ed7ecb4b3098995b073085a2c7c6273c5e8",
+}
+SOURCE_BLOBS = {EDEN_COMMIT: ORIGINAL_BLOBS, CANDIDATE_SHA: CANDIDATE_BLOBS}
 EXISTING_SOURCE_SPECS = {
     "src/tests/core/graphics_supervisor.cpp": ("[graphics-supervisor]", 22),
     "src/tests/video_core/native_semaphore.cpp": ("[native-gpu]", 7),
@@ -193,8 +201,11 @@ def adapt_case(case: Case) -> str:
     return body
 
 
-def transform(original: bytes) -> tuple[bytes, dict]:
-    if git_blob(original) != ORIGINAL_BLOBS[TEST_PATH]:
+def transform(original: bytes, *, eden_revision: str = EDEN_COMMIT) -> tuple[bytes, dict]:
+    if eden_revision not in SOURCE_BLOBS:
+        raise ValueError(f"wrong Eden revision: {eden_revision}")
+    blobs = SOURCE_BLOBS[eden_revision]
+    if git_blob(original) != blobs[TEST_PATH]:
         raise ValueError("test contents do not match the frozen source blob")
     prefix, cases = split_cases(original.decode("utf-8"))
     if not (COMPATIBLE_CASES | UNRESOLVED_CASES.keys()) <= {case.name for case in cases}:
@@ -247,8 +258,8 @@ def transform(original: bytes) -> tuple[bytes, dict]:
         raise ValueError(f"unexpected reconciliation inventory: {counts}")
     manifest = {
         "schema_version": 1,
-        "frozen_commit": EDEN_COMMIT,
-        "guarded_original_blobs": dict(ORIGINAL_BLOBS),
+        "frozen_commit": eden_revision,
+        "guarded_original_blobs": dict(blobs),
         "modified_path": TEST_PATH,
         "patched_test_blob": git_blob(patched),
         "catch2_filter": CATCH2_FILTER,
@@ -295,17 +306,18 @@ def checked_file(root: Path, relative: str) -> Path:
     return path
 
 
-def reconcile(root: Path, *, verify_applied: bool = False) -> dict:
+def reconcile(root: Path, *, verify_applied: bool = False,
+              eden_revision: str = EDEN_COMMIT) -> dict:
     root = root.resolve(strict=True)
     top = Path(git_output(root, "rev-parse", "--show-toplevel").decode().strip()).resolve()
     if top != root:
         raise ValueError("pass the exact Eden checkout root")
     commit = git_output(root, "rev-parse", "HEAD").decode().strip()
-    if commit != EDEN_COMMIT:
-        raise ValueError(f"wrong Eden revision: expected {EDEN_COMMIT}, found {commit}")
-    original = git_output(root, "show", f"{EDEN_COMMIT}:{TEST_PATH}")
-    patched, manifest = transform(original)
-    for relative, expected in ORIGINAL_BLOBS.items():
+    if eden_revision not in SOURCE_BLOBS or commit != eden_revision:
+        raise ValueError(f"wrong Eden revision: expected {eden_revision}, found {commit}")
+    original = git_output(root, "show", f"{eden_revision}:{TEST_PATH}")
+    patched, manifest = transform(original, eden_revision=eden_revision)
+    for relative, expected in SOURCE_BLOBS[eden_revision].items():
         if verify_applied and relative == TEST_PATH:
             expected = manifest["patched_test_blob"]
         actual = git_blob(checked_file(root, relative).read_bytes())
@@ -331,13 +343,15 @@ def reconcile(root: Path, *, verify_applied: bool = False) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("eden_checkout", type=Path)
+    parser.add_argument("--eden-revision", choices=EDEN_REVISIONS, default=EDEN_COMMIT)
     parser.add_argument("--verify-applied", action="store_true",
                         help="check the exact applied result without modifying source")
     parser.add_argument("--manifest", type=Path,
                         help="write case inventory and source identities as JSON")
     args = parser.parse_args()
     try:
-        manifest = reconcile(args.eden_checkout, verify_applied=args.verify_applied)
+        manifest = reconcile(args.eden_checkout, verify_applied=args.verify_applied,
+                             eden_revision=args.eden_revision)
         if args.manifest:
             args.manifest.write_text(json.dumps(manifest, indent=2) + "\n")
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
