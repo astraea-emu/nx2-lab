@@ -30,6 +30,12 @@ FRAGMENT_RGBA = ((255, 0, 255, 255), (0, 255, 0, 255))
 NATIVE_HEADER_SIZE = 128
 VERTEX_COUNT = 3
 VERTEX_SIZE = VERTEX_COUNT * 16
+ANIMATION_OFFSETS = (((0, 0), (1, 0), (0, 1), (-1, 0)),
+                     ((0, 0), (-1, 0), (0, 1), (1, 0)))
+ANIMATION_FRAME_COUNT = 4
+ANIMATION_INPUT_SIZE = 64
+# High and low render-target address words in the first increasing RT packet.
+IMAGE_ADDRESS_OFFSET = 9 * 4
 
 
 def _float(value: float) -> int:
@@ -75,7 +81,7 @@ def _fragment_shader(variant: int) -> bytes:
     return bytes(result)
 
 
-def _commands(clear_only: bool) -> tuple[int, ...]:
+def _commands(clear_only: bool, image_address: int = IMAGE_GPU_ADDRESS) -> tuple[int, ...]:
     words: list[int] = []
 
     def emit(byte_method: int, *arguments: int) -> None:
@@ -94,7 +100,7 @@ def _commands(clear_only: bool) -> tuple[int, ...]:
     # Native 16-GOB block height, array of one image, layer stride 8192 bytes.
     # ImageInfo interprets array_pitch in words (multiplied by four).
     # Android Rgba8888 is little-endian RGBA: RenderTargetFormat 0xD5.
-    emit(0x0800, *_address(IMAGE_GPU_ADDRESS), WIDTH, HEIGHT,
+    emit(0x0800, *_address(image_address), WIDTH, HEIGHT,
          0xD5, 0x40, 1, IMAGE_SIZE // 4, 0, 0)
     emit(0x0A00, *(_float(x) for x in (8, 4.5, 1, 8, 4.5, 0)), 0x6420, 0)
     emit(0x0C00, WIDTH << 16, HEIGHT << 16, _float(0), _float(1))
@@ -149,21 +155,45 @@ def _commands(clear_only: bool) -> tuple[int, ...]:
 GPFIFO_WORD_COUNT = len(_commands(False))
 
 
-def build_gpu_buffer(variant: int = 0, clear_only: bool = False) -> bytes:
+def _vertices(dx: int = 0, dy: int = 0) -> bytes:
+    return struct.pack("<12f", -0.75 + dx / 8, -5 / 9 + dy * 2 / 9, 0.5, 1,
+                       0.75 + dx / 8, -5 / 9 + dy * 2 / 9, 0.5, 1,
+                       -0.75 + dx / 8, 5 / 9 + dy * 2 / 9, 0.5, 1)
+
+
+def build_animation_inputs(variant: int = 0) -> bytes:
+    """Four bounded guest uploads: target address and changing original vertices."""
+    if type(variant) is not int or variant not in (0, 1):
+        raise ValueError("variant must be 0 or 1")
+    return b"".join((_words(list(_address(IMAGE_GPU_ADDRESS + (frame % 2) * IMAGE_SIZE))) +
+                     _vertices(dx, dy)).ljust(ANIMATION_INPUT_SIZE, b"\0")
+                    for frame, (dx, dy) in enumerate(ANIMATION_OFFSETS[variant]))
+
+
+def build_gpu_buffer(variant: int = 0, clear_only: bool = False, *,
+                     animation_frame: int | None = None) -> bytes:
     """Return one zero-padded GPU allocation; no host draw or rasterization runs."""
     if type(variant) is not int or variant not in (0, 1):
         raise ValueError("variant must be 0 or 1")
     if type(clear_only) is not bool:
         raise ValueError("clear_only must be boolean")
-    command_words = _commands(clear_only)
+    if animation_frame is not None and (
+            type(animation_frame) is not int or not 0 <= animation_frame < ANIMATION_FRAME_COUNT
+            or clear_only):
+        raise ValueError("animation frame must be 0 through 3 without clear-only")
+    image_address = IMAGE_GPU_ADDRESS
+    dx = dy = 0
+    if animation_frame is not None:
+        image_address += (animation_frame % 2) * IMAGE_SIZE
+        dx, dy = ANIMATION_OFFSETS[variant][animation_frame]
+    command_words = _commands(clear_only, image_address)
     if len(command_words) != GPFIFO_WORD_COUNT:
         raise ValueError("control changed the declared GPFIFO word count")
     # The explicit upper-left viewport maps these to (2, 2), (14, 2), (2, 7).
-    vertices = struct.pack("<12f", -0.75, -5 / 9, 0.5, 1,
-                           0.75, -5 / 9, 0.5, 1,
-                           -0.75, 5 / 9, 0.5, 1)
+    vertices = _vertices(dx, dy)
     sections = ((0, _words(list(command_words))), (VS_OFFSET, _vertex_shader()),
-                (FS_OFFSET, _fragment_shader(variant)), (VERTEX_OFFSET, vertices))
+                (FS_OFFSET, _fragment_shader(0 if animation_frame is not None else variant)),
+                (VERTEX_OFFSET, vertices))
     result = bytearray(GPU_BUFFER_SIZE)
     for index, (offset, data) in enumerate(sections):
         end = sections[index + 1][0] if index + 1 < len(sections) else GPU_BUFFER_SIZE

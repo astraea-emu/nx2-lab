@@ -21,8 +21,8 @@ import sys
 import tempfile
 import time
 
-from assess_native_frame import CAPTURE_SIZE, assess, verify_pixels
-from assess_native_ipc import MAX_LOG_SIZE
+from assess_native_frame import CAPTURED, CAPTURE_SIZE, assess, verify_pixels
+from assess_native_ipc import BOUNDARY, MAX_LOG_SIZE
 from build_native_engine import EDEN_REVISIONS, EDEN_SHA, build_engine, digest
 
 ROOT = Path(__file__).resolve().parent
@@ -36,6 +36,8 @@ GPU_CONFIG = CONFIG + "".join(
         ("use_asynchronous_shaders", "false"))) + (
     "[Miscellaneous]\nlog_filter=*:Info HW.GPU:Debug Service.NVDRV:Debug Shader:Debug\n"
     "log_filter\\default=false\n")
+ANIMATION_CONFIG = GPU_CONFIG.replace("Service.NVDRV:Debug", "Service.NVDRV:Debug Service.AM:Debug")
+FLUSH_CONFIG = "flush_line=true\nflush_line\\default=false\n"
 
 
 def read_capped(path: Path, maximum: int) -> bytes:
@@ -43,13 +45,15 @@ def read_capped(path: Path, maximum: int) -> bytes:
         return stream.read(maximum + 1)
 
 
-def verify_shader_inputs(directory: Path, variant: int, clear_only: bool) -> bool:
+def verify_shader_inputs(directory: Path, variant: int, clear_only: bool, *,
+                         animation: bool = False) -> bool:
     """Bind the engine's observed native shader pages to the original inputs."""
     from native_gpu_commands import FS_OFFSET, VERTEX_OFFSET, VS_OFFSET, build_gpu_buffer
     snapshots = {p.name: p for p in directory.glob("native-graphics-shader-*.bin")}
     if clear_only:
         return not snapshots
-    inputs = build_gpu_buffer(variant)
+    # The animation edit changes vertices while keeping the original shaders.
+    inputs = build_gpu_buffer(0 if animation else variant)
     expected = {"native-graphics-shader-1.bin": inputs[VS_OFFSET:FS_OFFSET],
                 "native-graphics-shader-5.bin": inputs[FS_OFFSET:VERTEX_OFFSET]}
     return snapshots.keys() == expected.keys() and all(
@@ -80,26 +84,88 @@ def vulkan_environment(trial_home: Path, icd: Path, *, gpu: bool = False) -> dic
     return env
 
 
+class AnimationCaptures:
+    """Archive completed readbacks before arming the next on-demand capture."""
+
+    def __init__(self, directory: Path):
+        self.directory = directory
+        self.offset = 0
+        self.pending = b""
+        self.events: list[dict] = []
+        self.error: str | None = None
+
+    def poll(self) -> None:
+        if self.error is not None:
+            return
+        try:
+            with (self.directory / "runtime.log").open("rb") as stream:
+                stream.seek(self.offset)
+                raw = stream.read(MAX_LOG_SIZE + 1 - self.offset)
+            self.offset += len(raw)
+            if self.offset > MAX_LOG_SIZE:
+                raise ValueError("animation runtime log exceeds the input limit")
+            lines = (self.pending + raw).split(b"\n")
+            self.pending = lines.pop()
+            for raw_line in lines:
+                line = BOUNDARY.sub("", raw_line.decode("utf-8", "replace").removesuffix("\r"))
+                if not CAPTURED.fullmatch(line):
+                    continue
+                frame = len(self.events)
+                if frame >= 4:
+                    raise ValueError("animation produced more than four capture callbacks")
+                source = self.directory / "native-latest-frame.tga"
+                if source.is_symlink() or not source.is_file():
+                    raise ValueError("saved animation capture is missing or is a symlink")
+                pixels = read_capped(source, CAPTURE_SIZE)
+                if len(pixels) != CAPTURE_SIZE:
+                    raise ValueError("saved animation capture has an unexpected size")
+                destination = self.directory / f"frame-{frame}.tga"
+                with destination.open("xb") as output:
+                    output.write(pixels)
+                self.events.append({"frame": frame, "capture": destination.name,
+                                    "sha256": digest(destination), "callback": line})
+                if frame < 3:
+                    # The callback follows file close; no further capture can
+                    # overwrite it until this newly armed request is consumed.
+                    with (self.directory / "native-frame.request").open("x") as request:
+                        request.write(f"NX2 original animation frame {frame + 1}\n")
+        except (OSError, ValueError) as error:
+            self.error = str(error)
+
+
 def run_x11(command: list[str], directory: Path, env: dict[str, str],
-            log_name: str, seconds: int) -> tuple[int, float]:
+            log_name: str, seconds: int, *, captures: AnimationCaptures | None = None) -> tuple[int, float]:
     """Run one bounded process and preserve its complete output and return code."""
     started = time.monotonic()
     argv = ["xvfb-run", "-a", "-e", str(directory / (log_name + ".xvfb")),
             "-s", "-screen 0 1920x1080x24 -nolisten tcp", "timeout",
             "--signal=TERM", "--kill-after=4s", str(seconds) + "s", *command]
     with (directory / log_name).open("wb") as output:
-        result = subprocess.run(argv, cwd=directory, env=env, stdout=output,
-                                stderr=subprocess.STDOUT, check=False)
-    return result.returncode, time.monotonic() - started
+        with subprocess.Popen(argv, cwd=directory, env=env, stdout=output,
+                              stderr=subprocess.STDOUT) as process:
+            while process.poll() is None:
+                if captures is not None:
+                    captures.poll()
+                try:
+                    process.wait(timeout=0.02 if captures is not None else 1)
+                except subprocess.TimeoutExpired:
+                    pass
+            if captures is not None:
+                captures.poll()
+    return process.returncode, time.monotonic() - started
 
 
 def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
-          gpu: bool = False, clear_only: bool = False, eden_revision: str = EDEN_SHA) -> dict:
+          gpu: bool = False, clear_only: bool = False, animation: bool = False,
+          eden_revision: str = EDEN_SHA) -> dict:
+    if animation and (not gpu or clear_only):
+        raise ValueError("animation requires GPU work and cannot be clear-only")
     directory = output / ("clear-only" if clear_only else f"variant-{variant}")
     directory.mkdir()
     guest = directory / "guest"
     assembled = time.monotonic()
-    arguments = (["--gpu-triangle"] if gpu else []) + (["--clear-only"] if clear_only else [])
+    arguments = (["--gpu-animation"] if animation else ["--gpu-triangle"] if gpu else [])
+    arguments += ["--clear-only"] if clear_only else []
     with (directory / "fixture.log").open("wb") as log:
         subprocess.run([sys.executable, str(ROOT / "make_native_frame_exefs.py"),
                         "--output", str(guest), "--tool-prefix", prefix,
@@ -107,7 +173,8 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
                        stderr=subprocess.STDOUT, check=True)
     assemble_seconds = time.monotonic() - assembled
     config = directory / "config.ini"
-    config.write_text(GPU_CONFIG if gpu else CONFIG)
+    config.write_text((ANIMATION_CONFIG if animation else GPU_CONFIG if gpu else
+                       CONFIG + "[Miscellaneous]\n") + FLUSH_CONFIG)
     capture = directory / "native-latest-frame.tga"
     request = directory / "native-frame.request"
     if capture.exists() or request.exists():
@@ -115,17 +182,33 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
     # The compositor only captures newly acquired buffers. Arm before the single
     # presentation; real saved-capture ordering and every pixel are checked below.
     request.write_text("NX2 original image capture\n")
+    captures = AnimationCaptures(directory) if animation else None
+    command = ["stdbuf", "-oL", "-eL", str(cli), "--config", str(config),
+               "--singlecore", "--game", str(guest / "main")]
     with tempfile.TemporaryDirectory(prefix="nx2-frame-home-") as temporary:
         env = vulkan_environment(Path(temporary), icd, gpu=gpu)
         rc, runtime_seconds = run_x11(
-            [str(cli), "--config", str(config), "--singlecore", "--game", str(guest / "main")],
-            directory, env, "runtime.log", 30)
+            command, directory, env, "runtime.log", 60 if animation else 30, captures=captures)
+        engine_log = Path(temporary) / "data/eden/log/eden_log.txt"
+        if engine_log.is_file() and not engine_log.is_symlink():
+            (directory / "engine.log").write_bytes(read_capped(engine_log, MAX_LOG_SIZE))
     raw = read_capped(directory / "runtime.log", MAX_LOG_SIZE)
     pixels = (read_capped(capture, CAPTURE_SIZE) if capture.is_file() and not capture.is_symlink()
               and capture.stat().st_size == CAPTURE_SIZE else b"")
     report = io.StringIO()
     with contextlib.redirect_stdout(report):
-        if gpu:
+        if animation:
+            from assess_native_gpu_frame import assess_animation
+            frames = tuple(read_capped(directory / f"frame-{i}.tga", CAPTURE_SIZE)
+                           for i in range(len(captures.events)))
+            verified = assess_animation(raw, rc, frames, variant, eden_revision=eden_revision)
+            shaders_match = verify_shader_inputs(directory, variant, False, animation=True)
+            print(f"NX2_GPU_OBSERVED_SHADER_INPUTS_MATCH={int(shaders_match)}")
+            print(f"NX2_ANIMATION_CAPTURE_ARCHIVE_OK={int(captures.error is None and len(frames) == 4)}")
+            if captures.error is not None:
+                print(f"NX2_ANIMATION_CAPTURE_ERROR={captures.error}")
+            verified = verified and shaders_match and captures.error is None and len(frames) == 4
+        elif gpu:
             from assess_native_gpu_frame import assess as assess_gpu
             verified = assess_gpu(raw, rc, pixels, variant, clear_only=clear_only,
                                   eden_revision=eden_revision)
@@ -138,13 +221,18 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
     print(report.getvalue(), end="", flush=True)
     consumed = not request.exists()
     files = (guest / "main", guest / "main.npdm", directory / "runtime.log",
-             directory / "assessment.log", config, capture)
+             directory / "assessment.log", directory / "engine.log", config, capture)
+    if animation:
+        archive = directory / "capture-events.json"
+        archive.write_text(json.dumps({"events": captures.events, "error": captures.error}, indent=2) + "\n")
+        files += (archive, *(directory / event["capture"] for event in captures.events))
     if gpu:
         files += tuple(directory / name for name in ("native-graphics-registers.bin",
                        "native-graphics-shader-1.bin", "native-graphics-shader-5.bin"))
     result = {"eden_revision": eden_revision, "variant": variant,
               "process_rc": rc, "verified": verified and consumed,
-              "workload": "gpu-clear" if clear_only else "gpu-triangle" if gpu else "cpu-image",
+              "workload": "gpu-animation" if animation else "gpu-clear" if clear_only else "gpu-triangle" if gpu else "cpu-image",
+              "command": command,
               "request_consumed": consumed, "assemble_seconds": round(assemble_seconds, 3),
               "runtime_seconds": round(runtime_seconds, 3),
               "eden_environment": {key: value for key, value in env.items() if key.startswith("EDEN_")},
@@ -164,12 +252,17 @@ def main() -> int:
     parser.add_argument("--tool-prefix", default=os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-"))
     parser.add_argument("--variant", type=int, choices=(0, 1), default=0)
     parser.add_argument("--both", action="store_true", help="also prove that the changed guest produces its different image")
-    parser.add_argument("--gpu-triangle", action="store_true",
-                        help="render original guest shaders and include a clear-only negative control")
+    workload = parser.add_mutually_exclusive_group()
+    workload.add_argument("--gpu-triangle", action="store_true",
+                          help="render original guest shaders and include a clear-only negative control")
+    workload.add_argument("--gpu-animation", action="store_true",
+                          help="render four original frames with two reused display buffers")
     args = parser.parse_args()
-    label = "NX2_ORIGINAL_GPU_TRIANGLE" if args.gpu_triangle else "NX2_ORIGINAL_FRAME"
+    gpu = args.gpu_triangle or args.gpu_animation
+    label = ("NX2_ORIGINAL_GPU_ANIMATION" if args.gpu_animation else
+             "NX2_ORIGINAL_GPU_TRIANGLE" if gpu else "NX2_ORIGINAL_FRAME")
     try:
-        for name in ("git", "xvfb-run", "xauth", "timeout", "vulkaninfo",
+        for name in ("git", "xvfb-run", "xauth", "timeout", "stdbuf", "vulkaninfo",
                      *(args.tool_prefix + x for x in ("as", "ld", "objcopy"))):
             if shutil.which(name) is None:
                 raise ValueError(f"missing prerequisite: {name}")
@@ -191,7 +284,7 @@ def main() -> int:
         sources = (ROOT / "native_frame_probe.S", ROOT / "native_frame_probe.ld",
                    ROOT / "make_native_frame_exefs.py", Path(__file__),
                    ROOT / "assess_native_frame.py", ROOT / "build_native_engine.py")
-        if args.gpu_triangle:
+        if gpu:
             sources += tuple(ROOT / name for name in ("native_gpu_probe.S", "native_gpu_probe.ld",
                              "native_gpu_commands.py", "assess_native_gpu_frame.py"))
         provenance = {"eden_revision": args.eden_revision, "eden_cli_sha256": digest(cli),
@@ -210,7 +303,8 @@ def main() -> int:
                           ("llvmpipe", "VK_KHR_xlib_surface", "VK_KHR_swapchain")):
             raise ValueError("Lavapipe/X11 capabilities not established; inspect vulkan.log")
         variants = (0, 1) if args.both else (args.variant,)
-        results = [trial(cli, output, icd, args.tool_prefix, variant, gpu=args.gpu_triangle,
+        results = [trial(cli, output, icd, args.tool_prefix, variant, gpu=gpu,
+                         animation=args.gpu_animation,
                          eden_revision=args.eden_revision)
                    for variant in variants]
         if args.gpu_triangle:
@@ -220,7 +314,19 @@ def main() -> int:
         pixel_check = verify_pixels
         if args.gpu_triangle:
             from assess_native_gpu_frame import verify_pixels as pixel_check
-        if args.both and passed:
+        if args.gpu_animation and args.both and passed:
+            from assess_native_gpu_frame import verify_animation_pixels
+            a = tuple(read_capped(output / "variant-0" / f"frame-{i}.tga", CAPTURE_SIZE)
+                      for i in range(4))
+            b = tuple(read_capped(output / "variant-1" / f"frame-{i}.tga", CAPTURE_SIZE)
+                      for i in range(4))
+            with contextlib.redirect_stdout(io.StringIO()):
+                changed = (a != b and
+                           not all(verify_animation_pixels(frame, 0, i) for i, frame in enumerate(b)) and
+                           not all(verify_animation_pixels(frame, 1, i) for i, frame in enumerate(a)))
+            print(f"NX2_ANIMATION_VERTEX_EDIT_CHANGES_MOTION={int(changed)}")
+            passed = passed and changed
+        elif args.both and passed:
             a = read_capped(output / "variant-0/native-latest-frame.tga", CAPTURE_SIZE)
             b = read_capped(output / "variant-1/native-latest-frame.tga", CAPTURE_SIZE)
             with contextlib.redirect_stdout(io.StringIO()):
@@ -235,7 +341,7 @@ def main() -> int:
             passed = passed and negative
         summary = {"verified": passed, "output_directory": str(output),
                    "eden_revision": args.eden_revision,
-                   "workload": "gpu-triangle" if args.gpu_triangle else "cpu-image",
+                   "workload": "gpu-animation" if args.gpu_animation else "gpu-triangle" if gpu else "cpu-image",
                    "eden_cli_sha256": provenance["eden_cli_sha256"],
                    "engine_reused": engine["reused"],
                    "engine_prepare_seconds": round(prepare_seconds, 3),
@@ -245,7 +351,9 @@ def main() -> int:
                                  "process_rc": result["process_rc"],
                                  "main_sha256": result["files"]["main"],
                                  "npdm_sha256": result["files"]["main.npdm"],
-                                 "capture_sha256": result["files"].get("native-latest-frame.tga")}
+                                 "capture_sha256": result["files"].get("native-latest-frame.tga"),
+                                 **({"frame_sha256": [result["files"].get(f"frame-{i}.tga")
+                                                     for i in range(4)]} if args.gpu_animation else {})}
                                 for result in results]}
         (output / "run-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         print("NX2_FRAME_RUN " + json.dumps(summary, sort_keys=True), flush=True)

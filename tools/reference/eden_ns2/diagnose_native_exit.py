@@ -56,7 +56,7 @@ def capture_threads(pid: int, executable: Path, directory: Path) -> dict:
         raise RuntimeError("diagnostic target changed before debugger attachment")
     argv = ["sudo", "-n", "gdb", "--batch", "--nx", "--nh",
             "-iex", "set auto-load off", "-iex", "set debuginfod enabled off",
-            "-ex", "set pagination off", "-ex", "info threads",
+            "-ex", "set pagination off", "-ex", "info proc mappings", "-ex", "info threads",
             "-ex", "thread apply all bt", "-ex", "detach", "-p", str(pid)]
     path = directory / "host-backtrace.log"
     with path.open("wb") as stream:
@@ -80,41 +80,51 @@ def capture_threads(pid: int, executable: Path, directory: Path) -> dict:
 
 
 def diagnostic_run(command: list[str], directory: Path, env: dict[str, str],
-                   log_name: str, seconds: int) -> tuple[int, float]:
-    """Observe a slow original trial without substituting a successful result."""
-    executable = Path(command[0]).resolve(strict=True)
+                   log_name: str, seconds: int, *,
+                   captures: runner.AnimationCaptures | None = None) -> tuple[int, float]:
+    """Observe the unchanged animation, including its live capture collector."""
+    if command[:3] != ["stdbuf", "-oL", "-eL"] or captures is None:
+        raise ValueError("expected the exact line-buffered animation command and collector")
+    executable = Path(command[3]).resolve(strict=True)
     argv = ["xvfb-run", "-a", "-e", str(directory / (log_name + ".xvfb")),
             "-s", "-screen 0 1920x1080x24 -nolisten tcp", "timeout",
             "--signal=TERM", "--kill-after=4s", str(seconds) + "s",
-            "stdbuf", "-oL", "-eL", *command]
-    diagnostic = {"argv": argv, "copied_log_limit": FILE_LIMIT,
+            *command]
+    diagnostic = {"argv": argv, "io_mode": "animation-line-buffered", "copied_log_limit": FILE_LIMIT,
                   "trace_after_seconds": 15, "trace": None}
     started = time.monotonic()
     rc = None
     with (directory / log_name).open("wb") as output:
         process = subprocess.Popen(argv, cwd=directory, env=env, stdout=output,
                                    stderr=subprocess.STDOUT, start_new_session=True)
+        trace_attempted = False
         try:
-            try:
-                rc = process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                matches = engine_descendants(process.pid, executable)
-                diagnostic["matching_pids"] = matches
-                if len(matches) == 1:
-                    try:
-                        diagnostic["trace"] = capture_threads(matches[0], executable, directory)
-                    except (OSError, RuntimeError) as error:
-                        diagnostic["trace_error"] = str(error)
-                remaining = max(1, seconds + 6 - (time.monotonic() - started))
-                rc = process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired:
-            diagnostic["outer_deadline_exceeded"] = True
+            while process.poll() is None:
+                captures.poll()
+                elapsed = time.monotonic() - started
+                if elapsed >= 15 and not trace_attempted:
+                    trace_attempted = True
+                    matches = engine_descendants(process.pid, executable)
+                    diagnostic["matching_pids"] = matches
+                    if len(matches) == 1:
+                        try:
+                            diagnostic["trace"] = capture_threads(matches[0], executable, directory)
+                        except (OSError, RuntimeError) as error:
+                            diagnostic["trace_error"] = str(error)
+                if time.monotonic() - started > seconds + 6:
+                    diagnostic["outer_deadline_exceeded"] = True
+                    break
+                try:
+                    process.wait(timeout=0.02)
+                except subprocess.TimeoutExpired:
+                    pass
         finally:
             if process.poll() is None:
                 os.killpg(process.pid, signal.SIGKILL)
                 rc = process.wait(timeout=2)
             if rc is None:
                 rc = process.returncode
+            captures.poll()
             log = directory / log_name
             diagnostic["runtime_log_bytes"] = log.stat().st_size
             if log.stat().st_size > FILE_LIMIT:
@@ -142,7 +152,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--trials", type=int, choices=range(1, 21), default=20)
     args = parser.parse_args()
-    for tool in ("gdb", "sudo", "stdbuf", "xvfb-run", "xauth", "timeout"):
+    for tool in ("gdb", "sudo", "xvfb-run", "xauth", "timeout", "stdbuf"):
         if not shutil.which(tool):
             raise SystemExit("missing diagnostic prerequisite: " + tool)
     subprocess.run(["sudo", "-n", "true"], check=True)
@@ -164,12 +174,11 @@ def main() -> int:
                       runner.ROOT / "native_gpu_commands.py",
                       runner.ROOT / "assess_native_gpu_frame.py")},
                   "diagnostic_tools": {name: subprocess.check_output(
-                      [name, "--version"], text=True).splitlines()[0] for name in ("gdb", "stdbuf")}}
+                      [name, "--version"], text=True).splitlines()[0] for name in ("gdb",)}}
     (output / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
-    # The original GPU config ends in Miscellaneous. Only diagnostic I/O changes.
-    runner.GPU_CONFIG += "flush_line=true\nflush_line\\default=false\n"
     runner.run_x11 = diagnostic_run
-    summary = {"eden_revision": BASELINE_SHA, "trials": [], "first_failure": None,
+    summary = {"eden_revision": BASELINE_SHA, "workload": "gpu-animation", "variant": 0,
+               "trials": [], "first_failure": None,
                "complete": False, "diagnostic_only": True}
     try:
         for number in range(1, args.trials + 1):
@@ -177,8 +186,8 @@ def main() -> int:
                 raise RuntimeError("engine executable changed between trials")
             directory = output / f"trial-{number:02}"
             directory.mkdir()
-            result = runner.trial(cli, directory, icd, "aarch64-linux-gnu-", 1,
-                                  gpu=True, eden_revision=BASELINE_SHA)
+            result = runner.trial(cli, directory, icd, "aarch64-linux-gnu-", 0,
+                                  gpu=True, animation=True, eden_revision=BASELINE_SHA)
             summary["trials"].append({"number": number, "result": result})
             print("NX2_EXIT_DIAGNOSTIC_TRIAL " + json.dumps(
                 {"number": number, "rc": result["process_rc"], "verified": result["verified"]}),
@@ -189,7 +198,7 @@ def main() -> int:
             if number > 1:
                 # Preserve one successful image reference and every failed image.
                 # Later successful image hashes remain in each unchanged result.json.
-                for image in (directory / "variant-1").glob("*.tga"):
+                for image in (directory / "variant-0").glob("*.tga"):
                     image.unlink()
             total = sum(p.stat().st_size for p in output.rglob("*") if p.is_file())
             if total > ARTIFACT_LIMIT:

@@ -7,7 +7,7 @@ import unittest
 
 from make_native_exefs import NSO_HEADER, build_extended_npdm, build_nso
 from make_native_frame_exefs import (
-    FIELD_COUNT, GPU_SEGMENT_ADDRESSES, GPU_SEGMENT_SIZES, IMAGE_ADDRESS, IMAGE_SIZE,
+    ANIMATION_SEGMENT_SIZES, FIELD_COUNT, GPU_SEGMENT_ADDRESSES, GPU_SEGMENT_SIZES, IMAGE_ADDRESS, IMAGE_SIZE,
     MARKERS, REQUEST_BYTES, REQUEST_COUNT,
     REQUEST_SHA256, SEGMENT_ADDRESSES, SEGMENT_SIZES, build_frame_nso,
     compile_frame_segments, read_field_names, read_frame_segments, verify_frame_fixture,
@@ -219,6 +219,14 @@ class NativeGpuFixtureTests(unittest.TestCase):
         self.assertEqual(self.sections[0], self.fixtures[1, False][0])
         self.assertEqual(self.sections[2], self.fixtures[1, False][2])
 
+    def test_original_static_gpu_guest_bytes_remain_exact(self):
+        expected = {(0, False): "16ccb02247c22c26f8503e63e8f1d3fa0a48c8e4080002bd3644196a5701c519",
+                    (1, False): "33c5a0f9a753f4ec68f92a061a4063589eef9739465e1345f6b1d71aa95b0ec6",
+                    (0, True): "f8002354fd05610161e3b092e6b1bf6ea441e2b692c2077049152b2210d6f6d4"}
+        for mode, sections in self.fixtures.items():
+            self.assertEqual(hashlib.sha256(build_frame_nso(sections, gpu=True)).hexdigest(),
+                             expected[mode])
+
     def test_rehashed_commands_shaders_vertices_and_schema_corruption_fail(self):
         for offset in (self.names, self.inputs, self.inputs + 0x1000,
                        self.inputs + 0x2084, self.inputs + 0x3000):
@@ -247,6 +255,81 @@ class NativeGpuFixtureTests(unittest.TestCase):
     def test_clear_control_requires_gpu_mode(self):
         with self.assertRaisesRegex(ValueError, "requires the GPU"):
             compile_frame_segments(clear_only=True)
+
+
+class NativeAnimationFixtureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        cls.fixtures = [compile_frame_segments(prefix, variant=variant, gpu=True, animation=True)
+                        for variant in (0, 1)]
+        cls.npdm = build_extended_npdm()
+
+    def changed_fixture(self, section, offset, replacement):
+        sections = list(self.fixtures[0])
+        damaged = bytearray(sections[section])
+        damaged[offset:offset + len(replacement)] = replacement
+        sections[section] = bytes(damaged)
+        return build_frame_nso(tuple(sections), gpu=True, animation=True)
+
+    def test_actual_animation_has_two_empty_images_and_bounded_uploads(self):
+        from native_gpu_commands import build_animation_inputs
+        for variant, sections in enumerate(self.fixtures):
+            nso = build_frame_nso(sections, gpu=True, animation=True)
+            verify_frame_fixture(nso, self.npdm, variant, gpu=True, animation=True)
+            _, rodata, data = read_frame_segments(nso, gpu=True, animation=True)
+            self.assertEqual(tuple(map(len, read_frame_segments(nso, gpu=True, animation=True))),
+                             ANIMATION_SEGMENT_SIZES)
+            names, _ = read_field_names(rodata, animation=True)
+            self.assertEqual(len(names), 315)
+            self.assertEqual(data[0x1000:0x5000], bytes(16384))
+            layout = struct.unpack_from("<7I", rodata, rodata.index(b"NX2GPUv1") + 8)
+            self.assertEqual(layout[1], 359)
+            self.assertEqual(layout[2], 0x5000)
+            self.assertEqual(layout[5], 0x6000)
+            self.assertEqual(data[layout[2]:layout[2] + 359 * 4], b"\xff" * (359 * 4))
+            self.assertEqual(data[0x6000:], bytes(0x4000))
+            uploads, count, size, target = struct.unpack_from(
+                "<4I", rodata, rodata.index(b"NX2ANIM1") + 8)
+            self.assertEqual((count, size, target), (4, 64, 36))
+            self.assertEqual(rodata[uploads:uploads + 256], build_animation_inputs(variant))
+
+    def test_animation_variant_changes_only_metadata_and_vertex_sequence(self):
+        a, b = self.fixtures
+        self.assertEqual(a[0], b[0])
+        self.assertEqual(a[2], b[2])
+        _, requests = read_field_names(a[1], animation=True)
+        config = requests + REQUEST_BYTES
+        uploads = struct.unpack_from("<I", a[1], a[1].index(b"NX2ANIM1") + 8)[0]
+        differences = {i for i, (x, y) in enumerate(zip(a[1], b[1])) if x != y}
+        permitted = {config} | set(range(uploads + 64 + 8, uploads + 64 + 56)) | set(
+            range(uploads + 192 + 8, uploads + 192 + 56))
+        self.assertTrue(differences)
+        self.assertLessEqual(differences, permitted)
+
+    def test_rehashed_upload_layout_and_second_image_corruption_are_rejected(self):
+        rodata, data = self.fixtures[0][1:]
+        layout = rodata.index(b"NX2ANIM1") + 8
+        uploads = struct.unpack_from("<I", rodata, layout)[0]
+        for offset in (uploads, uploads + 64 + 8, uploads + 192 + 55, layout, layout + 4):
+            with self.subTest(offset=offset), self.assertRaises(ValueError):
+                verify_frame_fixture(self.changed_fixture(1, offset, bytes([rodata[offset] ^ 1])),
+                                     self.npdm, 0, gpu=True, animation=True)
+        for offset in (0x3000, 0x4FFF, 0x5000, 0x6000):
+            with self.subTest(offset=offset), self.assertRaises(ValueError):
+                verify_frame_fixture(self.changed_fixture(2, offset, bytes([data[offset] ^ 1])),
+                                     self.npdm, 0, gpu=True, animation=True)
+
+    def test_animation_and_static_containers_cannot_be_confused(self):
+        nso = build_frame_nso(self.fixtures[0], gpu=True, animation=True)
+        with self.assertRaises(ValueError):
+            read_frame_segments(nso, gpu=True)
+        with self.assertRaises(ValueError):
+            compile_frame_segments(animation=True)
+        with self.assertRaises(ValueError):
+            compile_frame_segments(gpu=True, animation=True, clear_only=True)
+        with self.assertRaises(ValueError):
+            verify_frame_fixture(nso, self.npdm, 1, gpu=True, animation=True)
 
 
 if __name__ == "__main__":
