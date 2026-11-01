@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Log parsing adapts earlier MIT-licensed NX2 material; see LICENSES/MIT.txt.
 """Check observed VI2 lifecycle replies, notification memory and guest teardown.
 
 The wire expectations come from Eden e2f285ab, not hardware observations.

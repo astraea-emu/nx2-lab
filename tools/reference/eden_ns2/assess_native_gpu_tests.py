@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Require the declared restored cases in an actual strict Catch2 test run.
 
 Checks source inventory, registered tests, executed results and process status.

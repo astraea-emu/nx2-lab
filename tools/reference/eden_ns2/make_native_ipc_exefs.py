@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Compile the original NX2 SM IPC guest into a bounded synthetic ExeFS.
 
 Requires GNU AArch64 binutils, not a console SDK. No emulator or ARM code runs

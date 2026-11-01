@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Create a clearly labeled, four-byte original-homebrew return-thunk variant.
 
 This does not modify or replace the exact-hash original NeXo NRO used as the

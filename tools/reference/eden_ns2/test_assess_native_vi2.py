@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Log-fixture patterns adapt earlier MIT-licensed NX2 tests; see LICENSES/MIT.txt.
 """Synthetic log controls; these tests do not claim emulator or guest execution."""
 import contextlib
 import io

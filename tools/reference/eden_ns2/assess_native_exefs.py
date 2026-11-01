@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Review actual source-built Eden CLI logs for original extended-ExeFS trial.
 
 A test fixture being generated or an NSO header being parsed is NOT guest
