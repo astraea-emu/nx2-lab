@@ -23,6 +23,7 @@ APPLET_BLOBS = {
 
 def patch_sources(svc: str, frontend: str) -> tuple[str, str]:
     before_svc = "    system.Exit();\n"
+    # AM requests frontend exit after the last process has terminated.
     after_svc = "    current_process->Exit(system.Kernel());\n"
     if svc.count(before_svc) != 1 or "current_process->GetState() == KProcess::State::Running" not in svc:
         raise ValueError("unexpected frozen ExitProcess implementation")
