@@ -15,8 +15,8 @@ import re
 import xml.etree.ElementTree as ET
 
 from overlay_native_gpu_tests import (
-    CATCH2_FILTER, COMBINED_FILTER, COMPATIBLE_CASES, EDEN_COMMIT,
-    EXISTING_SOURCE_SPECS, ORIGINAL_BLOBS, TEST_PATH, UNRESOLVED_CASES,
+    CATCH2_FILTER, COMBINED_FILTER, COMPATIBLE_CASES,
+    EXISTING_SOURCE_SPECS, SOURCE_BLOBS, TEST_PATH, UNRESOLVED_CASES,
 )
 
 EXPECTED_COUNTS = {
@@ -54,8 +54,9 @@ def manifest_cases(manifest: dict) -> tuple[dict, set[str]]:
     require(type(manifest) is dict, "manifest must be an object")
     require(type(manifest.get("schema_version")) is int and
             manifest["schema_version"] == 1, "unsupported manifest schema")
-    require(manifest.get("frozen_commit") == EDEN_COMMIT and
-            manifest.get("guarded_original_blobs") == ORIGINAL_BLOBS and
+    revision = manifest.get("frozen_commit")
+    require(isinstance(revision, str) and revision in SOURCE_BLOBS and
+            manifest.get("guarded_original_blobs") == SOURCE_BLOBS[revision] and
             manifest.get("modified_path") == TEST_PATH,
             "manifest source identity mismatch")
     require(manifest.get("catch2_filter") == CATCH2_FILTER and

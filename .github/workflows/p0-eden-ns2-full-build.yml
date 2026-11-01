@@ -9,6 +9,8 @@ on:
       - 'tools/reference/eden_ns2/test_overlay_native_gpu_tests.py'
       - 'tools/reference/eden_ns2/assess_native_gpu_tests.py'
       - 'tools/reference/eden_ns2/test_assess_native_gpu_tests.py'
+      - 'tools/reference/eden_ns2/build_native_engine.py'
+      - 'tools/reference/eden_ns2/test_build_native_engine.py'
 
 permissions:
   contents: read
@@ -19,10 +21,21 @@ concurrency:
 
 jobs:
   eden-runtime:
-    name: Frozen core and GPU build + strict restored native tests
+    name: Strict native GPU controls (${{ matrix.label }})
     runs-on: ubuntu-26.04
     timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: baseline
+            revision: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
+            cache_id: e2f285ab
+          - label: candidate
+            revision: b2cef0c0f2e8517673233e22c929918e2c60e654
+            cache_id: b2cef0c0
     env:
+      EDEN_SHA: ${{ matrix.revision }}
       EDEN_NATIVE_STRICT: '1'
       CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
     steps:
@@ -53,8 +66,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/eden-cxx-cache
-          key: eden-tests-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
+          key: eden-tests-ubuntu26-clang-${{ matrix.cache_id }}-v1-${{ github.sha }}
           restore-keys: |
+            eden-tests-ubuntu26-clang-${{ matrix.cache_id }}-v1-
+            eden-cli-ubuntu26-clang-${{ matrix.cache_id }}-v1-
             eden-tests-ubuntu26-clang-e2f285ab-v1-
             eden-cli-ubuntu26-clang-e2f285ab-v1-
       - name: Initialize cache and evidence directory
@@ -67,11 +82,10 @@ jobs:
           mkdir -p "$CCACHE_DIR" "$RUNNER_TEMP/native-gpu-evidence"
           ccache --max-size=1200M
           ccache --zero-stats
-          echo "NX2_EDEN_CACHE matched_key=$EDEN_CACHE_MATCHED_KEY exact_hit=$EDEN_CACHE_EXACT_HIT"
+          echo "NX2_EDEN_CACHE revision=$EDEN_SHA matched_key=$EDEN_CACHE_MATCHED_KEY exact_hit=$EDEN_CACHE_EXACT_HIT" \
+            | tee "$RUNNER_TEMP/native-gpu-evidence/cache.txt"
       - name: Fetch exact original Eden-NS2 GPL source (no vendor executables)
         shell: bash
-        env:
-          EDEN_SHA: e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/eden"
@@ -96,41 +110,50 @@ jobs:
             -s tools/reference/eden_ns2 -p test_overlay_native_gpu_tests.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 \
             -p test_assess_native_gpu_tests.py
-      - name: Apply one measured build-only narrowing fix to isolated upstream tree
+      - name: Verify the reviewed cast and repair only the baseline defect
         shell: bash
         run: |
           set -euo pipefail
-          # Original frozen Clang build failed: signed s32 layer narrowed in u64{layer}.
-          # For-loop starts layer at 0, increments while below resources.layers:
-          # conversion to u64 is safe, with no guest API/behavior change intended.
           export EDEN_SOURCE="$RUNNER_TEMP/eden"
           python3 - <<'PY'
           import os
           import pathlib
           import subprocess
+          import sys
+          sys.path.insert(0, 'tools/reference/eden_ns2')
+          from build_native_engine import BASELINE_SHA, CANDIDATE_SHA
           root = pathlib.Path(os.environ['EDEN_SOURCE'])
+          revision = os.environ['EDEN_SHA']
           name = 'src/video_core/texture_cache/util.cpp'
           path = root / name
-          expected = '94e841e8ea4e13beb547ecc1653b5088b770a166'
+          fixed = 'cb197563386f76c031d17382ac516fcad73196da'
+          expected = {BASELINE_SHA: '94e841e8ea4e13beb547ecc1653b5088b770a166',
+                      CANDIDATE_SHA: fixed}[revision]
           actual = subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip()
-          assert actual == expected, f'Frozen file provenance mismatch: {actual}'
+          assert actual == expected, f'Reviewed cast source mismatch: {actual}'
           old = 'const u64 segment_begin = u64{layer} * layer_stride + level_offset;'
           new = 'const u64 segment_begin = static_cast<u64>(layer) * layer_stride + level_offset;'
           source = path.read_text()
-          assert source.count(old) == 1, 'Expected exact one-line Clang narrowing defect'
           assert 'for (s32 layer = 0; layer < info.resources.layers; ++layer)' in source
-          path.write_text(source.replace(old, new))
+          if revision == BASELINE_SHA:
+              assert source.count(old) == 1, 'Expected exact one-line Clang narrowing defect'
+              path.write_text(source.replace(old, new))
+          else:
+              assert old not in source, 'Candidate already contains the upstream cast fix'
           assert path.read_text().count(new) == 1
+          assert subprocess.check_output(['git', '-C', str(root), 'hash-object', name], text=True).strip() == fixed
+          changed = subprocess.check_output(['git', '-C', str(root), 'diff', '--numstat'], text=True).splitlines()
+          assert changed == (['1\t1\t' + name] if revision == BASELINE_SHA else []), changed
           PY
           git -C "$RUNNER_TEMP/eden" diff --check
           git -C "$RUNNER_TEMP/eden" diff -- src/video_core/texture_cache/util.cpp
-          test "$(git -C "$RUNNER_TEMP/eden" diff --numstat | awk '{print $1, $2, $3}')" =             '1 1 src/video_core/texture_cache/util.cpp'
-          echo 'NX2_EDEN_ONE_LINE_BUILD_PATCH_VERIFIED'
+          echo 'NX2_EDEN_REVIEWED_CAST_VERIFIED'
       - name: Restore compatible native GPU cases with exact source guards
         shell: bash
         run: |
           set -euo pipefail
           python3 tools/reference/eden_ns2/overlay_native_gpu_tests.py "$RUNNER_TEMP/eden" \
+            --eden-revision "$EDEN_SHA" \
             --manifest "$RUNNER_TEMP/native-gpu-evidence/overlay.json"
           git -C "$RUNNER_TEMP/eden" diff --check
           git -C "$RUNNER_TEMP/eden" diff > "$RUNNER_TEMP/native-gpu-evidence/applied.diff"
@@ -184,14 +207,18 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/reference/eden_ns2/overlay_native_gpu_tests.py "$RUNNER_TEMP/eden" \
+            --eden-revision "$EDEN_SHA" \
             --verify-applied --manifest "$RUNNER_TEMP/native-gpu-evidence/overlay.json"
           EDEN_CHECKOUT="$RUNNER_TEMP/eden" python3 - <<'PY_CHECK'
-          import os, subprocess
+          import os, subprocess, sys
+          sys.path.insert(0, 'tools/reference/eden_ns2')
+          from build_native_engine import BASELINE_SHA
           root = os.environ['EDEN_CHECKOUT']
           changed = set(subprocess.check_output(
               ['git', '-C', root, 'diff', '--name-only'], text=True).splitlines())
-          expected = {'src/tests/core/native_gpu_characteristics.cpp',
-                      'src/video_core/texture_cache/util.cpp'}
+          expected = {'src/tests/core/native_gpu_characteristics.cpp'}
+          if os.environ['EDEN_SHA'] == BASELINE_SHA:
+              expected.add('src/video_core/texture_cache/util.cpp')
           if changed != expected:
               raise RuntimeError(f'Unexpected source modifications: {changed}')
           build_fix = subprocess.check_output(
@@ -226,7 +253,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: strict-native-gpu-evidence
+          name: strict-native-gpu-evidence-${{ matrix.cache_id }}
           retention-days: 14
           if-no-files-found: warn
           path: ${{ runner.temp }}/native-gpu-evidence/

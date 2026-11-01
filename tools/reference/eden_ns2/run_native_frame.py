@@ -23,7 +23,7 @@ import time
 
 from assess_native_frame import CAPTURE_SIZE, assess, verify_pixels
 from assess_native_ipc import MAX_LOG_SIZE
-from build_native_engine import EDEN_SHA, build_engine, digest
+from build_native_engine import EDEN_REVISIONS, EDEN_SHA, build_engine, digest
 
 ROOT = Path(__file__).resolve().parent
 CONFIG = "[Renderer]\n" + "".join(
@@ -34,7 +34,7 @@ GPU_CONFIG = CONFIG + "".join(
     f"{key}={value}\n{key}\\default=false\n" for key, value in (
         ("gpu_accuracy", 1), ("gpu_fence_behavior", 3),
         ("use_asynchronous_shaders", "false"))) + (
-    "[Miscellaneous]\nlog_filter=*:Info HW.GPU:Debug Service.NVDRV:Debug\n"
+    "[Miscellaneous]\nlog_filter=*:Info HW.GPU:Debug Service.NVDRV:Debug Shader:Debug\n"
     "log_filter\\default=false\n")
 
 
@@ -94,7 +94,7 @@ def run_x11(command: list[str], directory: Path, env: dict[str, str],
 
 
 def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
-          gpu: bool = False, clear_only: bool = False) -> dict:
+          gpu: bool = False, clear_only: bool = False, eden_revision: str = EDEN_SHA) -> dict:
     directory = output / ("clear-only" if clear_only else f"variant-{variant}")
     directory.mkdir()
     guest = directory / "guest"
@@ -127,7 +127,8 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
     with contextlib.redirect_stdout(report):
         if gpu:
             from assess_native_gpu_frame import assess as assess_gpu
-            verified = assess_gpu(raw, rc, pixels, variant, clear_only=clear_only)
+            verified = assess_gpu(raw, rc, pixels, variant, clear_only=clear_only,
+                                  eden_revision=eden_revision)
             shaders_match = verify_shader_inputs(directory, variant, clear_only)
             print(f"NX2_GPU_OBSERVED_SHADER_INPUTS_MATCH={int(shaders_match)}")
             verified = verified and shaders_match
@@ -141,7 +142,8 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
     if gpu:
         files += tuple(directory / name for name in ("native-graphics-registers.bin",
                        "native-graphics-shader-1.bin", "native-graphics-shader-5.bin"))
-    result = {"variant": variant, "process_rc": rc, "verified": verified and consumed,
+    result = {"eden_revision": eden_revision, "variant": variant,
+              "process_rc": rc, "verified": verified and consumed,
               "workload": "gpu-clear" if clear_only else "gpu-triangle" if gpu else "cpu-image",
               "request_consumed": consumed, "assemble_seconds": round(assemble_seconds, 3),
               "runtime_seconds": round(runtime_seconds, 3),
@@ -156,6 +158,7 @@ def main() -> int:
     started = time.monotonic()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine-dir", type=Path, default=Path("build/native-engine"))
+    parser.add_argument("--eden-revision", choices=EDEN_REVISIONS, default=EDEN_SHA)
     parser.add_argument("--output", type=Path, default=Path("build/native-frame"))
     parser.add_argument("--icd", type=Path, help="Lavapipe ICD JSON; otherwise discover installed lvp manifest")
     parser.add_argument("--tool-prefix", default=os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-"))
@@ -183,7 +186,7 @@ def main() -> int:
         output = Path(tempfile.mkdtemp(prefix="run-", dir=args.output.resolve()))
         print(f"NX2_FRAME_OUTPUT={output}", flush=True)
         preparing = time.monotonic()
-        source, cli, engine = build_engine(args.engine_dir)
+        source, cli, engine = build_engine(args.engine_dir, eden_revision=args.eden_revision)
         prepare_seconds = time.monotonic() - preparing
         sources = (ROOT / "native_frame_probe.S", ROOT / "native_frame_probe.ld",
                    ROOT / "make_native_frame_exefs.py", Path(__file__),
@@ -191,7 +194,7 @@ def main() -> int:
         if args.gpu_triangle:
             sources += tuple(ROOT / name for name in ("native_gpu_probe.S", "native_gpu_probe.ld",
                              "native_gpu_commands.py", "assess_native_gpu_frame.py"))
-        provenance = {"eden_revision": EDEN_SHA, "eden_cli_sha256": digest(cli),
+        provenance = {"eden_revision": args.eden_revision, "eden_cli_sha256": digest(cli),
                       "engine": engine, "eden_source": str(source), "icd": str(icd),
                       "icd_sha256": digest(icd),
                       "source_sha256": {p.name: digest(p) for p in sources}}
@@ -207,10 +210,12 @@ def main() -> int:
                           ("llvmpipe", "VK_KHR_xlib_surface", "VK_KHR_swapchain")):
             raise ValueError("Lavapipe/X11 capabilities not established; inspect vulkan.log")
         variants = (0, 1) if args.both else (args.variant,)
-        results = [trial(cli, output, icd, args.tool_prefix, variant, gpu=args.gpu_triangle)
+        results = [trial(cli, output, icd, args.tool_prefix, variant, gpu=args.gpu_triangle,
+                         eden_revision=args.eden_revision)
                    for variant in variants]
         if args.gpu_triangle:
-            results.append(trial(cli, output, icd, args.tool_prefix, 0, gpu=True, clear_only=True))
+            results.append(trial(cli, output, icd, args.tool_prefix, 0, gpu=True, clear_only=True,
+                                 eden_revision=args.eden_revision))
         passed = all(result["verified"] for result in results)
         pixel_check = verify_pixels
         if args.gpu_triangle:
@@ -229,6 +234,7 @@ def main() -> int:
             print(f"NX2_GPU_CLEAR_REJECTED_AS_TRIANGLE={int(negative)}")
             passed = passed and negative
         summary = {"verified": passed, "output_directory": str(output),
+                   "eden_revision": args.eden_revision,
                    "workload": "gpu-triangle" if args.gpu_triangle else "cpu-image",
                    "eden_cli_sha256": provenance["eden_cli_sha256"],
                    "engine_reused": engine["reused"],
@@ -237,6 +243,8 @@ def main() -> int:
                    "variants": [{"variant": result["variant"],
                                  "workload": result["workload"],
                                  "process_rc": result["process_rc"],
+                                 "main_sha256": result["files"]["main"],
+                                 "npdm_sha256": result["files"]["main.npdm"],
                                  "capture_sha256": result["files"].get("native-latest-frame.tga")}
                                 for result in results]}
         (output / "run-summary.json").write_text(json.dumps(summary, indent=2) + "\n")

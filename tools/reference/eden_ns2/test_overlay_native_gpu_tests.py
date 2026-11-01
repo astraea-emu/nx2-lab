@@ -38,6 +38,10 @@ class OverlayContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "frozen source blob"):
                     overlay.transform(data)
 
+    def test_unreviewed_revision_is_refused_before_transforming(self):
+        with self.assertRaisesRegex(ValueError, "wrong Eden revision"):
+            overlay.transform(b"", eden_revision="0" * 40)
+
     def test_replacement_refuses_missing_or_ambiguous_context(self):
         for source in ("unchanged", "target target"):
             with self.subTest(source=source):
@@ -61,10 +65,12 @@ class FrozenSourceOverlayTests(unittest.TestCase):
     def setUpClass(cls):
         cls.source = Path(SOURCE_ROOT).resolve()
         head = overlay.git_output(cls.source, "rev-parse", "HEAD").decode().strip()
-        if head != overlay.EDEN_COMMIT:
-            raise RuntimeError("NX2_EDEN_SOURCE must point to the exact frozen commit")
-        for path, expected in overlay.ORIGINAL_BLOBS.items():
-            content = overlay.git_output(cls.source, "show", f"{overlay.EDEN_COMMIT}:{path}")
+        if head not in overlay.SOURCE_BLOBS:
+            raise RuntimeError("NX2_EDEN_SOURCE must point to an exact reviewed commit")
+        cls.revision = head
+        cls.blobs = overlay.SOURCE_BLOBS[head]
+        for path, expected in cls.blobs.items():
+            content = overlay.git_output(cls.source, "show", f"{head}:{path}")
             if overlay.git_blob(content) != expected:
                 raise RuntimeError(f"source object mismatch: {path}")
 
@@ -77,15 +83,15 @@ class FrozenSourceOverlayTests(unittest.TestCase):
             ["git", "clone", "--quiet", "--shared", "--no-checkout",
              str(self.source), str(self.root)], check=True, capture_output=True)
         subprocess.run(
-            ["git", "-C", str(self.root), "reset", "--quiet", "--soft", overlay.EDEN_COMMIT],
+            ["git", "-C", str(self.root), "reset", "--quiet", "--soft", self.revision],
             check=True, capture_output=True)
         subprocess.run(
-            ["git", "-C", str(self.root), "checkout", overlay.EDEN_COMMIT, "--",
-             *overlay.ORIGINAL_BLOBS], check=True, capture_output=True)
+            ["git", "-C", str(self.root), "checkout", self.revision, "--",
+             *self.blobs], check=True, capture_output=True)
         self.original = (self.root / overlay.TEST_PATH).read_bytes()
 
     def apply(self):
-        return overlay.reconcile(self.root)
+        return overlay.reconcile(self.root, eden_revision=self.revision)
 
     def assert_test_unchanged(self):
         self.assertEqual((self.root / overlay.TEST_PATH).read_bytes(), self.original)
@@ -151,13 +157,13 @@ class FrozenSourceOverlayTests(unittest.TestCase):
 
     def test_production_sources_and_original_cmake_entry_are_not_changed(self):
         self.apply()
-        for path, expected in overlay.ORIGINAL_BLOBS.items():
+        for path, expected in self.blobs.items():
             if path != overlay.TEST_PATH:
                 with self.subTest(path=path):
                     self.assertEqual(overlay.git_blob((self.root / path).read_bytes()), expected)
 
     def test_drift_in_each_guarded_input_refuses_before_test_write(self):
-        for relative in overlay.ORIGINAL_BLOBS:
+        for relative in self.blobs:
             path = self.root / relative
             original = path.read_bytes()
             with self.subTest(path=relative):
@@ -190,6 +196,13 @@ class FrozenSourceOverlayTests(unittest.TestCase):
             self.apply()
         self.assert_test_unchanged()
 
+    def test_other_reviewed_revision_refuses_before_writing(self):
+        other = next(revision for revision in overlay.EDEN_REVISIONS
+                     if revision != self.revision)
+        with self.assertRaisesRegex(ValueError, "wrong Eden revision"):
+            overlay.reconcile(self.root, eden_revision=other)
+        self.assert_test_unchanged()
+
     def test_subdirectory_is_not_treated_as_checkout_root(self):
         with self.assertRaisesRegex(ValueError, "exact Eden checkout root"):
             overlay.reconcile(self.root / "src")
@@ -210,30 +223,30 @@ class FrozenSourceOverlayTests(unittest.TestCase):
         after = (self.root / overlay.TEST_PATH).read_bytes()
         with self.assertRaisesRegex(ValueError, "frozen source mismatch"):
             self.apply()
-        verified = overlay.reconcile(self.root, verify_applied=True)
+        verified = overlay.reconcile(self.root, verify_applied=True, eden_revision=self.revision)
         self.assertEqual(verified["overlay_state"], "verified_applied")
         self.assertEqual(verified["patched_test_blob"], applied["patched_test_blob"])
         self.assertEqual((self.root / overlay.TEST_PATH).read_bytes(), after)
 
     def test_verify_applied_rejects_unapplied_or_modified_results(self):
         with self.assertRaisesRegex(ValueError, "frozen source mismatch"):
-            overlay.reconcile(self.root, verify_applied=True)
+            overlay.reconcile(self.root, verify_applied=True, eden_revision=self.revision)
         self.apply()
         path = self.root / overlay.TEST_PATH
         path.write_bytes(path.read_bytes() + b"// drift\n")
         with self.assertRaisesRegex(ValueError, "frozen source mismatch"):
-            overlay.reconcile(self.root, verify_applied=True)
+            overlay.reconcile(self.root, verify_applied=True, eden_revision=self.revision)
 
     def test_cli_exports_auditable_manifest_without_claiming_execution(self):
         manifest_path = self.workspace / "manifest.json"
         result = subprocess.run(
             [sys.executable, overlay.__file__, str(self.root),
-             "--manifest", str(manifest_path)],
+             "--eden-revision", self.revision, "--manifest", str(manifest_path)],
             capture_output=True, text=True, check=True)
         manifest = json.loads(manifest_path.read_text())
         self.assertEqual(manifest["counts"]["selected_cases"], 29)
-        self.assertEqual(manifest["frozen_commit"], overlay.EDEN_COMMIT)
-        self.assertEqual(manifest["guarded_original_blobs"], overlay.ORIGINAL_BLOBS)
+        self.assertEqual(manifest["frozen_commit"], self.revision)
+        self.assertEqual(manifest["guarded_original_blobs"], self.blobs)
         self.assertIn("NX2_NATIVE_GPU_LINKED_CATCH2_EXECUTION_NOT_ESTABLISHED", result.stdout)
         self.assertNotIn("_PASS", result.stdout)
         self.assertEqual(result.stdout.count("NX2_NATIVE_GPU_UNRESOLVED="), 2)

@@ -14,6 +14,7 @@ import tempfile
 import unittest
 
 import native_gpu_commands as gpu
+from build_native_engine import CANDIDATE_SHA, EDEN_REVISIONS, git
 
 
 def packets(blob):
@@ -210,7 +211,13 @@ int main(int argc, char** argv) {
 class FrozenNativeShaderTests(unittest.TestCase):
     def test_actual_source_captures_lowers_and_rejects_malformed_programs(self):
         source = Path(os.environ["NX2_EDEN_SOURCE"]).resolve()
-        for path, expected in SOURCE_BLOBS.items():
+        revision = git(source, "rev-parse", "HEAD").decode().strip()
+        self.assertIn(revision, EDEN_REVISIONS, "unreviewed Eden source revision")
+        blobs = dict(SOURCE_BLOBS)
+        if revision == CANDIDATE_SHA:
+            blobs["shader_recompiler/frontend/ampere/lower_to_maxwell.h"] = \
+                "6a8cd826674fc3082bff3b88cfbe7dae5a9f6571"
+        for path, expected in blobs.items():
             content = (source / "src" / path).read_bytes()
             digest = hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
             self.assertEqual(digest, expected, path)
