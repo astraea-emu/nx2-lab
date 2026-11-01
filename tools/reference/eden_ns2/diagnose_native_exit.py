@@ -21,10 +21,6 @@ TRACE_LIMIT = 2 * 1024 * 1024
 ARTIFACT_LIMIT = 768 * 1024 * 1024
 
 
-def cap_file_size() -> None:
-    resource.setrlimit(resource.RLIMIT_FSIZE, (FILE_LIMIT, FILE_LIMIT))
-
-
 def engine_descendants(parent: int, executable: Path) -> list[int]:
     """Only inspect the launched process tree, then verify its executable link."""
     children: dict[int, list[int]] = {}
@@ -91,14 +87,13 @@ def diagnostic_run(command: list[str], directory: Path, env: dict[str, str],
             "-s", "-screen 0 1920x1080x24 -nolisten tcp", "timeout",
             "--signal=TERM", "--kill-after=4s", str(seconds) + "s",
             "stdbuf", "-oL", "-eL", *command]
-    diagnostic = {"argv": argv, "file_limit": FILE_LIMIT,
+    diagnostic = {"argv": argv, "copied_log_limit": FILE_LIMIT,
                   "trace_after_seconds": 15, "trace": None}
     started = time.monotonic()
     rc = None
     with (directory / log_name).open("wb") as output:
         process = subprocess.Popen(argv, cwd=directory, env=env, stdout=output,
-                                   stderr=subprocess.STDOUT, start_new_session=True,
-                                   preexec_fn=cap_file_size)
+                                   stderr=subprocess.STDOUT, start_new_session=True)
         try:
             try:
                 rc = process.wait(timeout=15)
@@ -120,6 +115,12 @@ def diagnostic_run(command: list[str], directory: Path, env: dict[str, str],
                 rc = process.wait(timeout=2)
             if rc is None:
                 rc = process.returncode
+            log = directory / log_name
+            diagnostic["runtime_log_bytes"] = log.stat().st_size
+            if log.stat().st_size > FILE_LIMIT:
+                with log.open("r+b") as retained:
+                    retained.truncate(FILE_LIMIT)
+                diagnostic["runtime_log_truncated"] = True
             source = Path(env["XDG_DATA_HOME"]) / "eden/log/eden_log.txt"
             if source.is_file() and not source.is_symlink():
                 raw = runner.read_capped(source, FILE_LIMIT)
