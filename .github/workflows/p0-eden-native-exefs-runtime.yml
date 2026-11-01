@@ -323,6 +323,29 @@ jobs:
                 --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
                 --output "$RUNNER_TEMP/native-animation-stress" --gpu-animation --both \
                 >"$log" 2>&1; then
+              python3 - "$log" "$RUNNER_TEMP/native-animation-stress-failure.json" "$attempt" <<'PY'
+              import json, sys
+              from pathlib import Path
+              log, destination, attempt = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+              results = []
+              for line in log.read_text(errors="replace").splitlines():
+                  for prefix in ("NX2_FRAME_TRIAL ", "NX2_FRAME_RUN "):
+                      if line.startswith(prefix):
+                          try:
+                              item = json.loads(line[len(prefix):])
+                          except ValueError:
+                              continue
+                          if prefix == "NX2_FRAME_TRIAL ":
+                              results.append({"variant": item.get("variant"),
+                                              "rc": item.get("process_rc"),
+                                              "verified": item.get("verified"),
+                                              "runtime_seconds": item.get("runtime_seconds")})
+                          else:
+                              results.append({"invocation_verified": item.get("verified", False)})
+              receipt = {"attempt": attempt, "trials": results, "no_trial_result": not results}
+              destination.write_text(json.dumps(receipt, indent=2) + "\n")
+              print("NX2_ANIMATION_STRESS_FAILURE_RECEIPT " + json.dumps(receipt, sort_keys=True))
+              PY
               echo "NX2_ANIMATION_STRESS_FAILED attempt=$attempt; trial not accepted"
               exit 1
             fi
@@ -393,6 +416,7 @@ jobs:
             ${{ runner.temp }}/native-gpu-first.log
             ${{ runner.temp }}/native-gpu-repeat.log
             ${{ runner.temp }}/native-gpu/
+            ${{ runner.temp }}/native-animation-stress-failure.json
             ${{ runner.temp }}/native-animation-first.log
             ${{ runner.temp }}/native-animation-repeat.log
             ${{ runner.temp }}/native-animation/
