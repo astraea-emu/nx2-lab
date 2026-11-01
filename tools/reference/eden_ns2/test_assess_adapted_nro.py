@@ -1,8 +1,11 @@
 """Regress the real exit-lifecycle failure modes without rebuilding Eden."""
 import contextlib
 import io
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
+import assess_adapted_nro
 from assess_adapted_nro import assess
 
 PREFIX = b"Debug.Emulated <Info> core/hle/kernel/svc/svc_debug_string.cpp:25:OutputDebugString: "
@@ -83,6 +86,22 @@ class AdaptedNroAssessmentTest(unittest.TestCase):
     def test_unrelated_filesystem_warning_does_not_hide_success(self):
         result, _ = self.run_case(GOOD + b"Common.Filesystem <Error> Failed to open playtime.bin\n")
         self.assertTrue(result)
+
+    def test_oversize_input_is_refused_before_log_parsing(self):
+        with patch.object(assess_adapted_nro, "MAX_LOG_SIZE", 16):
+            verdict, output = self.run_case()
+        self.assertFalse(verdict)
+        self.assertIn("NX2_ADAPTED_LOG_OVERSIZE_REFUSED", output)
+
+    def test_cli_caps_read_even_if_a_file_grows(self):
+        stream = io.BytesIO(bytes(100))
+        with patch.object(assess_adapted_nro, "MAX_LOG_SIZE", 16), \
+                patch.object(Path, "open", return_value=stream), \
+                patch.object(stream, "read", wraps=stream.read) as read, \
+                patch("sys.argv", ["assess_adapted_nro.py", "--log", "growing.log", "--exit", "0"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(assess_adapted_nro.main(), 1)
+            read.assert_called_once_with(17)
 
 
 if __name__ == "__main__":

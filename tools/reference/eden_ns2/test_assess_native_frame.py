@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -439,6 +440,21 @@ class NativeFrameAssessmentTests(unittest.TestCase):
             self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
             capture.write_bytes(b"truncated")
             self.assertEqual(subprocess.run(command, capture_output=True).returncode, 1)
+
+    def test_cli_bounds_reads_after_a_file_grows_beyond_stat_size(self):
+        streams = (io.BytesIO(bytes(100)), io.BytesIO(image_fixture() + b"extra"))
+        with patch.object(assess_native_frame, "MAX_LOG_SIZE", 16), \
+                patch.object(Path, "stat", side_effect=(SimpleNamespace(st_size=16),
+                    SimpleNamespace(st_size=assess_native_frame.CAPTURE_SIZE))), \
+                patch.object(Path, "open", side_effect=streams), \
+                patch.object(streams[0], "read", wraps=streams[0].read) as log_read, \
+                patch.object(streams[1], "read", wraps=streams[1].read) as capture_read, \
+                patch("sys.argv", ["assess_native_frame.py", "--log", "growing.log", "--exit", "0",
+                                   "--capture", "growing.tga", "--variant", "0"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(assess_native_frame.main(), 1)
+            log_read.assert_called_once_with(17)
+            capture_read.assert_called_once_with(assess_native_frame.CAPTURE_SIZE + 1)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("radar", ROOT / "tools/competitive_radar.py")
@@ -42,6 +43,21 @@ class RadarTests(unittest.TestCase):
         text = radar.render(["a/b"], state, {}, "2026-10-30 10:00")
         self.assertIn("success (other SHA)", text)
         self.assertNotIn("success (exact HEAD)", text)
+
+    def test_issue_lookup_paginates_and_refuses_incomplete_history(self):
+        full_page = [{"title": "Unrelated", "number": i} for i in range(100)]
+        existing = {"title": radar.TITLE, "number": 24, "state": "closed"}
+        with patch.object(radar, "api", side_effect=[full_page, [existing]]) as api:
+            self.assertIs(radar.find_issue("a/b", ""), existing)
+            self.assertEqual(api.call_count, 2)
+            self.assertTrue(api.call_args.args[0].endswith("page=2"))
+
+        # There may be an existing or closed report beyond the lookup budget.
+        # An incomplete search must never authorize creation of another issue.
+        with patch.object(radar, "api", side_effect=[full_page, full_page]) as api:
+            with self.assertRaisesRegex(radar.RadarError, "200-item limit"):
+                radar.find_issue("a/b", "")
+            self.assertEqual(api.call_count, 2)
 
 
 if __name__ == "__main__":

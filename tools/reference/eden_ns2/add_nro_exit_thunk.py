@@ -13,12 +13,16 @@ import argparse
 from pathlib import Path
 import struct
 
+from nro_preflight import MAX_IMAGE_SIZE
+
 NRO_HEADER_SIZE = 0x80
 SVC_EXIT = 0xD40000E1
 PAGE = 0x1000
 
 
 def add_exit_thunk(original: bytes) -> tuple[bytes, int]:
+    if len(original) > MAX_IMAGE_SIZE:
+        raise ValueError("NRO fixture file exceeds the input limit")
     if len(original) < NRO_HEADER_SIZE or original[0x10:0x14] != b"NRO0":
         raise ValueError("missing NRO header/magic")
     text_offset, text_size = struct.unpack_from("<II", original, 0x20)
@@ -45,8 +49,16 @@ def main() -> int:
     parser.add_argument("--original", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    original = args.original.read_bytes()
-    adapted, offset = add_exit_thunk(original)
+    try:
+        if args.output.exists() and args.output.samefile(args.original):
+            raise ValueError("output must not alias the original NRO")
+        if args.original.stat().st_size > MAX_IMAGE_SIZE:
+            raise ValueError("NRO fixture file exceeds the input limit")
+        with args.original.open("rb") as source:
+            original = source.read(MAX_IMAGE_SIZE + 1)
+        adapted, offset = add_exit_thunk(original)
+    except (OSError, ValueError) as error:
+        parser.exit(1, f"NX2_NRO_RETURN_THUNK_REFUSED: {error}\n")
     args.output.write_bytes(adapted)
     print(f"NX2_EDEN_OWNED_RETURN_THUNK_BUILT offset={offset} bytes_modified=4")
     print("NX2_EDEN_ORIGINAL_NRO_UNMODIFIED=1")

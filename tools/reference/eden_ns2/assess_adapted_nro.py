@@ -32,6 +32,9 @@ EXIT_PROCESS = re.compile(
 
 def assess(raw: bytes, process_rc: int) -> bool:
     print(f"NX2_ADAPTED_NRO_PROCESS_EXIT={process_rc}")
+    if len(raw) > MAX_LOG_SIZE:
+        print("NX2_ADAPTED_LOG_OVERSIZE_REFUSED")
+        return False
     print_log("ADAPTED", raw)
     messages = guest_messages(raw)
     previous_index = -1
@@ -64,9 +67,12 @@ def main() -> int:
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--exit", required=True, type=int, dest="process_rc")
     args = parser.parse_args()
-    if args.log.stat().st_size > MAX_LOG_SIZE:
-        parser.exit(1, "NX2_ADAPTED_LOG_OVERSIZE_REFUSED\n")
-    return 0 if assess(args.log.read_bytes(), args.process_rc) else 1
+    try:
+        with args.log.open("rb") as source:
+            raw = source.read(MAX_LOG_SIZE + 1)
+    except OSError as error:
+        parser.exit(1, f"NX2_ADAPTED_LOG_UNAVAILABLE: {error}\n")
+    return 0 if assess(raw, args.process_rc) else 1
 
 
 if __name__ == "__main__":

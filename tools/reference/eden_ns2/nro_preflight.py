@@ -15,6 +15,7 @@ import struct
 PAGE = 0x1000
 HEADER_SIZE = 0x80
 MOD_HEADER_SIZE = 0x1C
+ASSET_HEADER_SIZE = 0x38
 MAX_IMAGE_SIZE = 128 * 1024 * 1024
 MAX_PROGRAM_ALLOCATION = 256 * 1024 * 1024
 
@@ -42,6 +43,8 @@ def preflight_nro(image: bytes) -> NroLayout:
         raise TypeError("preflight expects immutable bytes")
     if len(image) < HEADER_SIZE:
         raise NroPreflightError("truncated NRO header")
+    if len(image) > MAX_IMAGE_SIZE:
+        raise NroPreflightError("NRO fixture file exceeds the input limit")
     if image[0x10:0x14] != b"NRO0":
         raise NroPreflightError("invalid NRO0 magic")
 
@@ -53,12 +56,22 @@ def preflight_nro(image: bytes) -> NroLayout:
     copied_bytes = (image_bytes + PAGE - 1) & ~(PAGE - 1)
     if copied_bytes > len(image):
         raise NroPreflightError("Eden's page-aligned memcpy would read past file")
-    if copied_bytes + bss_bytes > MAX_PROGRAM_ALLOCATION:
-        raise NroPreflightError("unbounded guest image plus BSS allocation")
     if module_offset > copied_bytes - MOD_HEADER_SIZE:
         raise NroPreflightError("MOD0 metadata would read beyond allocated image")
     if module_offset % 4:
         raise NroPreflightError("unaligned MOD0 metadata offset")
+
+    # Frozen Eden nro.cpp LoadNroImpl replaces the header BSS with the MOD0
+    # end-start span when that magic is present, then page-aligns it. Bound the
+    # allocation it actually performs, not only the ignored header value.
+    if image[module_offset:module_offset + 4] == b"MOD0":
+        bss_start, bss_end = struct.unpack_from("<II", image, module_offset + 8)
+        if bss_end < bss_start:
+            raise NroPreflightError("MOD0 BSS range would underflow")
+        bss_bytes = bss_end - bss_start
+    bss_bytes = (bss_bytes + PAGE - 1) & ~(PAGE - 1)
+    if copied_bytes + bss_bytes > MAX_PROGRAM_ALLOCATION:
+        raise NroPreflightError("unbounded guest image plus effective BSS allocation")
 
     segments = []
     for name, pos in (("text", 0x20), ("rodata", 0x28), ("data", 0x30)):
@@ -73,6 +86,17 @@ def preflight_nro(image: bytes) -> NroLayout:
     for left, right in zip(segments, segments[1:]):
         if left[1] + left[2] > right[1]:
             raise NroPreflightError("overlapping NRO load segments")
+
+    # AppLoader_NRO also consumes an optional ASET trailer before execution.
+    # Its icon path allocates the declared ReadBytes size before checking how
+    # many bytes the file supplies; bound every nonempty trailer extent first.
+    asset_bytes = len(image) - image_bytes
+    if (asset_bytes >= ASSET_HEADER_SIZE and
+            image[image_bytes:image_bytes + 4] == b"ASET"):
+        for name, position in (("icon", 8), ("NACP", 24), ("RomFS", 40)):
+            offset, size = struct.unpack_from("<QQ", image, image_bytes + position)
+            if size and (offset > asset_bytes or size > asset_bytes - offset):
+                raise NroPreflightError(f"ASET {name} exceeds the supplied file")
     return NroLayout(image_bytes, copied_bytes, bss_bytes, module_offset, tuple(segments))
 
 
@@ -81,7 +105,11 @@ def main() -> int:
     parser.add_argument("nro", type=Path, help="NRO guest fixture to validate")
     args = parser.parse_args()
     try:
-        layout = preflight_nro(args.nro.read_bytes())
+        if args.nro.stat().st_size > MAX_IMAGE_SIZE:
+            raise NroPreflightError("NRO fixture file exceeds the input limit")
+        with args.nro.open("rb") as source:
+            image = source.read(MAX_IMAGE_SIZE + 1)
+        layout = preflight_nro(image)
     except (NroPreflightError, OSError) as exc:
         parser.exit(1, f"NX2_NRO_PREFLIGHT_REFUSED: {exc}\n")
     print(f"NX2_NRO_PREFLIGHT_PASS image={layout.image_bytes} "

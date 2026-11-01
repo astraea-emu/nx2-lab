@@ -21,6 +21,12 @@ def demand(condition, reason):
     if not condition:
         raise ExternalElfRefused(reason)
 
+def read_elf(source) -> bytes:
+    """Read at most one byte beyond the fixture cap, including growing files."""
+    raw = source.read(MAX_ELF + 1)
+    demand(len(raw) <= MAX_ELF, 'elf_size')
+    return raw
+
 def make_owned_image(data: bytes) -> tuple[bytes, int, int]:
     demand(64 <= len(data) <= MAX_ELF, 'elf_size')
     demand(data[:6] == b'\x7fELF\x02\x01' and data[6] == 1,
@@ -88,7 +94,8 @@ def main():
                         help='Research-only verified original message sidecar')
     args = parser.parse_args()
     try:
-        raw = args.elf.read_bytes()
+        with args.elf.open('rb') as source:
+            raw = read_elf(source)
         image, count, pointer = make_owned_image(raw)
     except (OSError, ExternalElfRefused, struct.error) as exc:
         parser.exit(2, 'NX2_EXTERNAL_ELF_REFUSED:' + str(exc) + '\n')

@@ -153,6 +153,13 @@ def read_xml(raw: bytes, root_name: str) -> ET.Element:
     return root
 
 
+def read_report(path: Path) -> bytes:
+    with path.open("rb") as source:
+        raw = source.read(MAX_REPORT + 1)
+    require(0 < len(raw) <= MAX_REPORT, "missing or oversized report file")
+    return raw
+
+
 def assess(manifest: dict, listed: bytes, results: bytes,
            exit_code: int, strict_mode: str) -> dict:
     require(exit_code == 0, f"Catch2 process failed or timed out: {exit_code}")
@@ -221,8 +228,8 @@ def main() -> int:
     parser.add_argument("--exit", type=int, required=True, dest="exit_code")
     args = parser.parse_args()
     try:
-        result = assess(json.loads(args.manifest.read_text()), args.listed.read_bytes(),
-                        args.results.read_bytes(), args.exit_code,
+        result = assess(json.loads(read_report(args.manifest).decode("utf-8")), read_report(args.listed),
+                        read_report(args.results), args.exit_code,
                         os.environ.get("EDEN_NATIVE_STRICT", ""))
     except (OSError, ValueError, TypeError, KeyError, ET.ParseError) as error:
         parser.exit(1, f"NX2_NATIVE_GPU_RESULTS_REFUSED: {error}\n")

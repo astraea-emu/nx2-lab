@@ -40,6 +40,30 @@ def no_duplicate_pairs(pairs):
     return obj
 
 
+def read_abi(source):
+    """Bound bytes before JSON decoding, even if an input file grows."""
+    data = source.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES:
+        raise Refused("oversized_abi_json")
+    return json.loads(data, object_pairs_hook=no_duplicate_pairs)
+
+
+def bounded_input_negative_cases():
+    class OversizedSource:
+        def read(self, size):
+            if size != MAX_BYTES + 1:
+                raise Refused("abi_read_was_not_bounded")
+            return bytes(size)
+    try:
+        read_abi(OversizedSource())
+    except Refused as error:
+        if str(error) != "oversized_abi_json":
+            raise
+    else:
+        raise Refused("oversized_abi_json_admitted")
+    return 1
+
+
 def verify(obj):
     if not isinstance(obj, dict):
         raise Refused("top_level_not_object")
@@ -125,19 +149,19 @@ def main():
     p.add_argument("--source-revision", required=True)
     args = p.parse_args()
     try:
-        data = args.abi.read_bytes()
-        if len(data) > MAX_BYTES:
-            raise Refused("oversized_abi_json")
-        obj = json.loads(data, object_pairs_hook=no_duplicate_pairs)
+        with args.abi.open("rb") as source:
+            obj = read_abi(source)
         result = verify(obj)
         count = negative_cases(obj)
+        input_count = bounded_input_negative_cases()
     except (OSError, Refused, ValueError, TypeError) as e:
         p.exit(2, "HBX_CONTRACT_REFUSED:" + str(e) + "\n")
     result.update({"source_revision": args.source_revision,
-                   "negative_cases": count})
+                   "negative_cases": count, "bounded_input_negative_cases": input_count})
     print("NX2_HBX_HOST_ABI_CONTRACT_PASS")
     print("hbx_abi_version=3")
     print(f"hbx_contract_negative_cases={count}")
+    print(f"hbx_bounded_input_negative_cases={input_count}")
     print("console_observations=0")
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
 

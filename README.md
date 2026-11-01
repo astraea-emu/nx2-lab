@@ -25,7 +25,8 @@ With a Windows multi-configuration generator, use `build/Debug/nx2lab.exe`.
 The demo executes two original AArch64 instructions and reports `x0=43`.
 `run-owned` accepts the project's small NX2OWNED fixture format. These commands
 exercise the local oracle. The [original image trial](CONTRIBUTING.md#original-image-trial-linux)
-uses a separately built external engine; [Status](docs/STATUS.md) records its evidence and limits.
+prepares a pinned external engine and checks fresh captures with one command;
+[Status](docs/STATUS.md) records its evidence and limits.
 
 ## Project guide
 

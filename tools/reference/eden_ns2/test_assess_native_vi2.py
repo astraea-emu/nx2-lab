@@ -2,6 +2,7 @@
 """Synthetic log controls; these tests do not claim emulator or guest execution."""
 import contextlib
 import io
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -298,6 +299,16 @@ class NativeVi2AssessmentTests(unittest.TestCase):
             ok, output = self.run_case()
         self.assertFalse(ok)
         self.assertIn("NX2_NATIVE_VI2_LOG_LIMIT_EXCEEDED", output)
+
+    def test_cli_caps_the_actual_read_even_if_a_file_grows(self):
+        stream = io.BytesIO(bytes(100))
+        with patch.object(assess_native_vi2, "MAX_LOG_SIZE", 16), \
+                patch.object(Path, "open", return_value=stream), \
+                patch.object(stream, "read", wraps=stream.read) as read, \
+                patch("sys.argv", ["assess_native_vi2.py", "--log", "growing.log", "--exit", "0"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(assess_native_vi2.main(), 1)
+            read.assert_called_once_with(17)
 
 
 if __name__ == "__main__":

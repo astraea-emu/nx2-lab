@@ -29,26 +29,36 @@ supplies that source and requires the runtime checks.
 
 ## Original image trial (Linux)
 
-Use the exact Eden revision and three build/lifecycle repairs in the
-[runtime workflow](.github/workflows/p0-eden-native-exefs-runtime.yml).
-That workflow records the complete engine build. The local runner requires
-its already-built `eden-cli`, source checkout, GNU AArch64 binutils, `xvfb`,
-`xauth`, `mesa-vulkan-drivers` and `vulkan-tools`.
+The local runner and [runtime workflow](.github/workflows/p0-eden-native-exefs-runtime.yml)
+use the same pinned Eden source, recorded repairs and build recipe.
+The full engine requires Linux, CMake 3.31+, Clang and the listed development
+packages. CI qualifies Ubuntu 26.04 with Lavapipe; other environments remain
+unqualified. Install prerequisites once, from the repository root:
 
 ```sh
-python3 tools/reference/eden_ns2/run_native_frame.py \
-  --eden-cli /path/to/eden-build/bin/eden-cli \
-  --eden-source /path/to/eden \
-  --both
+python3 tools/reference/eden_ns2/build_native_engine.py --print-packages
+sudo apt-get update
+sudo apt-get install $(python3 tools/reference/eden_ns2/build_native_engine.py --print-packages)
 ```
 
-This assembles and runs two original guest colour variants, reuses the engine
-binary, and checks fresh Vulkan captures against independent pixel references.
-It creates a new directory under `build/native-frame/` with images, raw logs,
-hashes and timings. Both variants must pass; each must fail the other's pixel
-reference. Exit code 0 and `NX2_ORIGINAL_FRAME_PASS` mean the trial passed.
-The runner does not build or install Eden; a single-command engine setup is
-still the [next step](docs/PLAN.md).
+Then run:
+
+```sh
+python3 tools/reference/eden_ns2/run_native_frame.py --both
+```
+
+The first invocation fetches and builds the engine under `build/native-engine/`,
+then assembles and runs two original guest colour variants. Repeat the same
+command to validate and reuse the engine, run its incremental build and create
+fresh Vulkan captures. Both variants must match their independent pixel
+references and fail each other's reference. Exit 0 and
+`NX2_ORIGINAL_FRAME_PASS` mean the complete trial passed.
+
+Each invocation saves images, raw logs, source/build hashes and measured times
+in a new directory under `build/native-frame/`. Use `--engine-dir` and `--output`
+to select other locations. Changed engine inputs or an interrupted build require
+a fresh engine directory; existing files are never reset or cleaned. The recipe
+records system package versions but does not provide a hermetic toolchain.
 
 ## External-runtime changes
 

@@ -1,9 +1,13 @@
 """Original report mutations prevent incomplete/failed GPU runs passing the gate."""
 import copy
+import io
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 
-from assess_native_gpu_tests import EXPECTED_COUNTS, assess
+import assess_native_gpu_tests
+from assess_native_gpu_tests import EXPECTED_COUNTS, assess, read_report
 from overlay_native_gpu_tests import (
     CATCH2_FILTER, COMBINED_FILTER, COMPATIBLE_CASES, EDEN_COMMIT,
     EXISTING_SOURCE_SPECS, ORIGINAL_BLOBS, TEST_PATH, UNRESOLVED_CASES,
@@ -178,6 +182,23 @@ class GpuReportTests(unittest.TestCase):
         for raw in (b"<MatchingTests/>", b"not XML", b'<!DOCTYPE x><Catch2TestRun/>'):
             with self.subTest(raw=raw), self.assertRaises((ValueError, ET.ParseError)):
                 assess(self.manifest, ET.tostring(self.listed), raw, 0, "1")
+
+    def test_report_files_are_bounded_before_json_or_xml_parsing(self):
+        # The same bounded reader admits the manifest, listing and result XML.
+        for name in ("manifest.json", "listed.xml", "results.xml"):
+            stream = io.BytesIO(bytes(100))
+            with self.subTest(name=name), \
+                    patch.object(assess_native_gpu_tests, "MAX_REPORT", 16), \
+                    patch.object(Path, "open", return_value=stream), \
+                    patch.object(stream, "read", wraps=stream.read) as read:
+                with self.assertRaisesRegex(ValueError, "oversized report"):
+                    read_report(Path(name))
+                read.assert_called_once_with(17)
+
+    def test_report_reader_preserves_exact_valid_bytes(self):
+        raw = b'{"manifest": 1}\n'
+        with patch.object(Path, "open", return_value=io.BytesIO(raw)):
+            self.assertEqual(read_report(Path("manifest.json")), raw)
 
     def test_unrelated_33_cases_cannot_replace_the_previous_native_cases(self):
         for case in self.results.findall("TestCase")[-33:]:

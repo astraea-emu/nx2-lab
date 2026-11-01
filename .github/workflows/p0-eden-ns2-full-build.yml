@@ -56,13 +56,18 @@ jobs:
           key: eden-tests-ubuntu26-clang-e2f285ab-v1-${{ github.sha }}
           restore-keys: |
             eden-tests-ubuntu26-clang-e2f285ab-v1-
+            eden-cli-ubuntu26-clang-e2f285ab-v1-
       - name: Initialize cache and evidence directory
         shell: bash
+        env:
+          EDEN_CACHE_MATCHED_KEY: ${{ steps.eden-cache.outputs.cache-matched-key }}
+          EDEN_CACHE_EXACT_HIT: ${{ steps.eden-cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           mkdir -p "$CCACHE_DIR" "$RUNNER_TEMP/native-gpu-evidence"
           ccache --max-size=1200M
           ccache --zero-stats
+          echo "NX2_EDEN_CACHE matched_key=$EDEN_CACHE_MATCHED_KEY exact_hit=$EDEN_CACHE_EXACT_HIT"
       - name: Fetch exact original Eden-NS2 GPL source (no vendor executables)
         shell: bash
         env:
@@ -162,7 +167,9 @@ jobs:
             build_jobs=4
           fi
           echo "NX2_EDEN_BUILD_RESOURCES cpu=$cpu_count memory_kib=$memory_kib available_kib=$available_kib jobs=$build_jobs"
+          eden_build_started=$SECONDS
           cmake --build "$RUNNER_TEMP/eden-build" --target core video_core tests --parallel "$build_jobs"
+          echo "NX2_EDEN_TIMING native_gpu_build_seconds=$((SECONDS - eden_build_started))"
           test -x "$RUNNER_TEMP/eden-build/bin/tests"
           ccache --show-stats
           echo NX2_EDEN_RECONCILED_TEST_TARGET_COMPILED
