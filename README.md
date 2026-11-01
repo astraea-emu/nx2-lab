@@ -3,10 +3,11 @@
 A research lab for Switch 2 emulation: original guest workloads, repeatable
 external-runtime tests and a small AArch64 CPU/memory correctness oracle.
 
-Original ARM64 guests complete checked IPC and display a CPU-drawn image
-through a pinned Eden build on Linux. Both original and edited images match
-every expected captured pixel and exit naturally. This establishes one
-presentation path; NX2 has no developer SDK or verified game compatibility.
+Original ARM64 guests complete checked IPC and execute original vertex and
+fragment shaders through a pinned Eden build on Linux. Two triangle colours
+match every expected captured pixel; a clear-only control fails both triangle
+references. All three guests exit naturally. NX2 has no developer SDK or
+verified game compatibility.
 
 ## Build and run
 
