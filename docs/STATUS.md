@@ -48,6 +48,11 @@ configuration and executable are checked on reuse.
 The [repository review](https://github.com/astraea-emu/nx2-lab/pull/42) corrected
 false-positive fixture/runtime checks, incomplete NRO allocation checks and
 unbounded input reads. These improve acceptance evidence, not engine capability.
+One later [runtime trial](https://github.com/astraea-emu/nx2-lab/actions/runs/41272036375)
+failed because concurrent startup messages interleaved in Eden's console log.
+The shared recipe now locks each complete POSIX console record; the strict
+evidence checker remains unchanged. [PR #43](https://github.com/astraea-emu/nx2-lab/pull/43)
+retains that failure, the source-guarded repair and its concurrency regression.
 
 [Evidence](SOURCES.md) preserves earlier full records, source/input hashes,
 applied changes, raw-report digests and earlier failures. Dated proposals

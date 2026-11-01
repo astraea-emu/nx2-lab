@@ -29,11 +29,18 @@ EDEN_SHA = "e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c"
 EDEN_REPO = "https://github.com/0x2593/Eden-NS2.git"
 CAST = "src/video_core/texture_cache/util.cpp"
 LOADER = "src/core/loader/loader.h"
+LOGGING = "src/common/logging.cpp"
 SOURCE_BLOBS = {**overlay_eden_exit.ORIGINAL_BLOBS,
                 CAST: "94e841e8ea4e13beb547ecc1653b5088b770a166",
-                LOADER: "d3c0230cb0637bbd227ba30b703960f0b50ecbb6"}
+                LOADER: "d3c0230cb0637bbd227ba30b703960f0b50ecbb6",
+                LOGGING: "ed12d5253244c1cd464c0a3703e62e412aeda8b6"}
 CAST_BEFORE = "const u64 segment_begin = u64{layer} * layer_stride + level_offset;"
 CAST_AFTER = "const u64 segment_begin = static_cast<u64>(layer) * layer_stride + level_offset;"
+CONSOLE_WRITES = r'''            std::fwrite(buffer, 1, (std::min)(sizeof(buffer) - 1, result.size), stdout);
+            std::fwrite(entry.message, 1, entry.message_len, stdout);
+            std::fwrite("\x1b[0m\n", 1, sizeof("\x1b[0m\n"), stdout);'''
+CONSOLE_LOCKED_WRITES = ("            ::flockfile(stdout);\n" + CONSOLE_WRITES +
+                         "\n            ::funlockfile(stdout);")
 APT_PACKAGES = tuple("""ccache clang cmake ninja-build autoconf automake libtool
 pkg-config nasm binutils-aarch64-linux-gnu g++ git python3 ca-certificates
 libfmt-dev liblz4-dev nlohmann-json3-dev libzstd-dev libssl-dev zlib1g-dev
@@ -99,6 +106,19 @@ def bounded_read(path: Path, limit: int) -> bytes:
     return raw
 
 
+def patch_console_logging(original: str) -> str:
+    """Serialize the frozen POSIX record writes without changing any bytes.
+
+    Prefix formatting stays outside the lock. All three enclosed stdio calls
+    are nonthrowing; the stream lock also coordinates other stdout stdio users.
+    """
+    before, start, rest = original.partition("#else // ^^^ Windows vvv POSIX\n")
+    posix, end, after = rest.partition("#endif\n};")
+    if not start or not end or posix.count(CONSOLE_WRITES) != 1:
+        raise ValueError("unexpected original POSIX console write site")
+    return before + start + posix.replace(CONSOLE_WRITES, CONSOLE_LOCKED_WRITES) + end + after
+
+
 def inspect_source(root: Path, allow_original: bool = False) -> dict[str, bytes]:
     """Check every tracked byte/mode, not index flags or just Git's dirty status."""
     root = plain_path(root)
@@ -120,7 +140,7 @@ def inspect_source(root: Path, allow_original: bool = False) -> dict[str, bytes]
     if set(index) != set(tree) or len(index) != len(tree):
         raise ValueError("Git index path inventory differs from the pinned tree")
     if any(tree.get(name, (None, None))[1] != blob for name, blob in SOURCE_BLOBS.items()):
-        raise ValueError("frozen loader, cast or exit-overlay blob changed")
+        raise ValueError("frozen loader, cast, logging or exit-overlay blob changed")
     originals = {name: git(root, "show", f"{EDEN_SHA}:{name}") for name in SOURCE_BLOBS}
     if any(blob_digest(raw) != SOURCE_BLOBS[name] for name, raw in originals.items()):
         raise ValueError("original Git object bytes do not match the reviewed blobs")
@@ -131,6 +151,7 @@ def inspect_source(root: Path, allow_original: bool = False) -> dict[str, bytes]
     if cast.count(CAST_BEFORE) != 1 or "for (s32 layer = 0; layer < info.resources.layers; ++layer)" not in cast:
         raise ValueError("unexpected original cast site")
     expected[CAST] = cast.replace(CAST_BEFORE, CAST_AFTER).encode()
+    expected[LOGGING] = patch_console_logging(originals[LOGGING].decode()).encode()
     for name, (mode, blob, size) in tree.items():
         path = plain_path(root / name)
         info = path.stat()

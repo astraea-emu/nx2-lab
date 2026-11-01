@@ -5,13 +5,20 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import build_native_engine as engine
 from test_overlay_eden_exit import fixtures
+
+
+def console_source():
+    return ("Unchanged Windows branch\n#else // ^^^ Windows vvv POSIX\n" +
+            engine.CONSOLE_WRITES + "\n#endif\n};\nUnchanged file backend\n")
 
 
 class EngineTests(unittest.TestCase):
@@ -26,6 +33,7 @@ class EngineTests(unittest.TestCase):
         self.original.update({engine.CAST:
             "for (s32 layer = 0; layer < info.resources.layers; ++layer) {\n" +
             engine.CAST_BEFORE + "\n}\n", engine.LOADER: "enum ResultStatus { Success, ErrorBadNPDMHeader = 4 };\n",
+            engine.LOGGING: console_source(),
             "README": "Original source\n", ".gitignore": ".cache/\nsrc/common/scm_rev.cpp\nexternals/generated/\n",
             "tool.sh": "#!/bin/sh\nexit 0\n"})
         for name, text in self.original.items():
@@ -96,7 +104,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(binary, self.build / "bin/eden-cli")
         self.assertFalse(first["reused"])
         modified = first["modified_source_sha256"]
-        self.assertEqual(len(modified), 3)
+        self.assertEqual(len(modified), 4)
         mtimes = {name: (source / name).stat().st_mtime_ns for name in modified}
         _, _, second = self.build_engine()
         self.assertTrue(second["reused"])
@@ -120,6 +128,12 @@ class EngineTests(unittest.TestCase):
         with patch.dict(engine.SOURCE_BLOBS, {engine.LOADER: "0" * 40}):
             with self.assertRaisesRegex(ValueError, "blob changed"):
                 self.build_engine()
+
+    def test_wrong_logging_blob_is_refused_before_repair(self):
+        with patch.dict(engine.SOURCE_BLOBS, {engine.LOGGING: "0" * 40}):
+            with self.assertRaisesRegex(ValueError, "blob changed"):
+                self.build_engine()
+        self.assertEqual((self.source / engine.LOGGING).read_text(), console_source())
 
     def test_non_overlay_edit_is_found_even_when_git_assumes_unchanged(self):
         self.git("update-index", "--assume-unchanged", "README")
@@ -332,7 +346,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(len(fetches), 1)
         self.assertEqual(fetches[0][-1], engine.EDEN_SHA)
         self.assertEqual(self.git("rev-parse", "HEAD").strip(), engine.EDEN_SHA)
-        self.assertEqual(len(engine.check_source(self.source)), 3)
+        self.assertEqual(len(engine.check_source(self.source)), 4)
 
     def test_exact_prepared_source_without_a_receipt_is_not_repatched(self):
         engine.prepare_source(self.source)
@@ -361,6 +375,117 @@ class EngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unverified preexisting ignored"):
             self.build_engine()
         self.assertEqual(self.commands, [])
+
+
+class ConsoleWriteTests(unittest.TestCase):
+    def test_only_the_frozen_posix_write_sequence_changes(self):
+        original = console_source()
+        repaired = engine.patch_console_logging(original)
+        self.assertEqual(repaired.replace(engine.CONSOLE_LOCKED_WRITES, engine.CONSOLE_WRITES),
+                         original)
+        self.assertTrue(repaired.startswith("Unchanged Windows branch\n"))
+        self.assertTrue(repaired.endswith("Unchanged file backend\n"))
+        self.assertEqual(repaired.count("::flockfile(stdout);"), 1)
+        self.assertEqual(repaired.count("::funlockfile(stdout);"), 1)
+        for changed in (original.replace("entry.message_len", "unreviewed_length"),
+                        original.replace("vvv POSIX", "vvv OTHER"),
+                        original.replace(engine.CONSOLE_WRITES, engine.CONSOLE_WRITES * 2)):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "write site"):
+                engine.patch_console_logging(changed)
+
+    @unittest.skipUnless(sys.platform == "linux", "POSIX stdout regression requires Linux")
+    def test_actual_write_fragment_serializes_forced_interleaving_and_preserves_bytes(self):
+        # These are the exact three calls guarded in the frozen source. Linker
+        # wrapping pauses A immediately after its first real fwrite; B probes
+        # the real FILE lock. No sleeps or probabilistic scheduling are used.
+        compiler = shutil.which("g++") or shutil.which("c++")
+        self.assertIsNotNone(compiler, "Linux verification requires a C++ compiler")
+        harness = r'''
+#include <algorithm>
+#include <condition_variable>
+#include <cstdio>
+#include <mutex>
+#include <thread>
+
+static std::mutex gate;
+static std::condition_variable changed;
+static bool prefix_written = false;
+static bool resume_writer = false;
+static thread_local char writer = 0;
+static thread_local unsigned calls = 0;
+
+extern "C" size_t __real_fwrite(const void*, size_t, size_t, FILE*);
+extern "C" size_t __wrap_fwrite(const void* data, size_t size, size_t count, FILE* stream) {
+    const size_t written = __real_fwrite(data, size, count, stream);
+    if (writer == 'A' && calls++ == 0) {
+        std::unique_lock<std::mutex> lock(gate);
+        prefix_written = true;
+        changed.notify_all();
+        changed.wait(lock, [] { return resume_writer; });
+    }
+    return written;
+}
+
+static void emit(char label) {
+    writer = label;
+    char buffer[256] = {label, ':', ' '};
+    struct { size_t size; } result{3};
+    const char message[] = {'x', '\0', 'y'};
+    struct { const char* message; size_t message_len; } entry{message, sizeof(message)};
+    /* GUARDED_WRITES */
+}
+
+static void release_writer() {
+    {
+        std::lock_guard<std::mutex> lock(gate);
+        resume_writer = true;
+    }
+    changed.notify_all();
+}
+
+int main() {
+    std::thread first([] { emit('A'); });
+    std::thread second([] {
+        {
+            std::unique_lock<std::mutex> lock(gate);
+            changed.wait(lock, [] { return prefix_written; });
+        }
+        if (::ftrylockfile(stdout) == 0) {
+            // The original sequence has already released its implicit lock.
+            emit('B');
+            ::funlockfile(stdout);
+            release_writer();
+        } else {
+            // The repaired sequence owns stdout until its complete record.
+            release_writer();
+            emit('B');
+        }
+    });
+    first.join();
+    second.join();
+}
+'''
+        repaired = engine.patch_console_logging(console_source())
+        repaired_fragment = repaired.partition("#else // ^^^ Windows vvv POSIX\n")[2].partition(
+            "#endif\n};")[0]
+        outputs = {}
+        with tempfile.TemporaryDirectory() as temporary:
+            for name, fragment in (("original", engine.CONSOLE_WRITES),
+                                   ("repaired", repaired_fragment)):
+                source = Path(temporary) / (name + ".cpp")
+                executable = Path(temporary) / name
+                source.write_text(harness.replace("/* GUARDED_WRITES */", fragment))
+                subprocess.run([compiler, "-std=c++17", "-pthread", "-O0", "-fno-builtin-fwrite",
+                                "-Wl,--wrap=fwrite", str(source), "-o", str(executable)],
+                               check=True, capture_output=True, timeout=30)
+                result = subprocess.run([str(executable)], capture_output=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, b"")
+                outputs[name] = result.stdout
+        suffix = b"x\0y\x1b[0m\n\0"  # Preserve message length and the existing suffix NUL.
+        self.assertEqual(outputs["original"], b"A: " + b"B: " + suffix + suffix)
+        self.assertEqual(outputs["repaired"], b"A: " + suffix + b"B: " + suffix)
+        self.assertNotEqual(outputs["original"], outputs["repaired"])
 
 
 class PrerequisiteTests(unittest.TestCase):

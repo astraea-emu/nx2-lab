@@ -30,7 +30,7 @@ supplies that source and requires the runtime checks.
 ## Original image trial (Linux)
 
 The local runner and [runtime workflow](.github/workflows/p0-eden-native-exefs-runtime.yml)
-use the same pinned Eden source, three verified repairs and build recipe.
+use the same pinned Eden source, recorded repairs and build recipe.
 The full engine requires Linux, CMake 3.31+, Clang and the listed development
 packages. CI qualifies Ubuntu 26.04 with Lavapipe; other environments remain
 unqualified. Install prerequisites once, from the repository root:
