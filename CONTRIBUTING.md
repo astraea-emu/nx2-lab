@@ -55,6 +55,5 @@ fixture rules and verify affected manifests. Follow the
 
 Submit original contributions under [GPL-3.0-only](LICENSE). Contributors retain
 their copyright; contributing does not assign it to the maintainer. Preserve
-existing copyright and license notices, including the [earlier MIT notice](LICENSES/MIT.txt).
-Review any separately licensed material before adding it. Earlier MIT grants
-remain valid; see [License](README.md#license).
+third-party copyright and license notices, and review external material before
+adding it.

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Reconcile 29 native GPU cases in an exact, ephemeral Eden GPL checkout.
 
 Only the upstream test file is written. Two DMA-contract cases remain verbatim
@@ -73,7 +72,7 @@ UNRESOLVED_CASES = {
 # The original data-RAM case supplies Decoded field values, which are encoded
 # and then decoded/executed by the real interpreter's existing raw-code API.
 MME_ENCODER = r"""
-// NX2 test compatibility helper; original MIT-authored transformation.
+// NX2 test compatibility helper; original transformation.
 // No runtime implementation changes. Uploaded words are high-to-low.
 namespace {
 template <std::size_t Count>

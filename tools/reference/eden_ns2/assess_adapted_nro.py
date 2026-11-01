@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Require complete computation and natural exit of the labeled NRO variant.
 
 The unchanged NRO is a separate execution-evidence control. This adapted guest

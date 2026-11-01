@@ -45,12 +45,8 @@ probes, with their workflows in `.github/workflows/`.
 Copyright (c) 2026 nx2-lab contributors.
 
 NX2 Lab is licensed under the [GNU GPL, version 3 only](LICENSE)
-(`GPL-3.0-only`), unless a component states otherwise. Forks, improvements and
-redistribution are welcome under those terms, including paid redistribution.
+(`GPL-3.0-only`). Forks, improvements and redistribution are welcome under
+those terms, including paid redistribution.
 
-Earlier MIT grants remain valid. The [original MIT notice](LICENSES/MIT.txt)
-covers original NX2 material published through
-[`501418b`](https://github.com/astraea-emu/nx2-lab/tree/501418b7b44d32de4501bc8987e4059e1a232d0c),
-including portions retained in later revisions.
 External components retain their own licenses. NX2 is unaffiliated with
 Nintendo, NVIDIA or the external emulator projects.

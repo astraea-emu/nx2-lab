@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Reject false IPC evidence, wrong replies and incomplete guest cleanup."""
 import contextlib
 import io

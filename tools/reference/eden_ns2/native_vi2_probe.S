@@ -1,7 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (c) 2026 nx2-lab contributors.
- * Request clearing and hexadecimal reporting adapt the earlier NX2 SM probe;
- * that MIT-licensed material retains its permission; see LICENSES/MIT.txt.
  * Original ARM64 workload for frozen Eden e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c.
  * This exercises its CMIF/TIPC service model, not hardware ABI or guest pixels.
  * All reply records start as ffffffff and contain observed W0/TLS/memory values.

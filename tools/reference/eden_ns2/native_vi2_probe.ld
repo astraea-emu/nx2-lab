@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (c) 2026 nx2-lab contributors.
- * Layout adapts the earlier MIT-licensed NX2 SM probe; see LICENSES/MIT.txt.
  * Original bounded three-page VI2 lifecycle guest.
  */
 OUTPUT_ARCH(aarch64)
