@@ -48,5 +48,13 @@ checks for the final PR head. Add a document only when the existing six cannot
 serve a distinct reader need; record routine investigation in the relevant issue.
 
 Evidence manifests hash exact bytes: preserve the repository's LF and binary
-fixture rules and verify affected manifests. Original NX2 files are MIT-licensed;
-follow the [research scope](docs/SECURITY.md) for inputs, data and disclosure.
+fixture rules and verify affected manifests. Follow the
+[research scope](docs/SECURITY.md) for inputs, data and disclosure.
+
+## Licensing contributions
+
+Submit original contributions under [GPL-3.0-only](LICENSE). Contributors retain
+their copyright; contributing does not assign it to the maintainer. Preserve
+existing copyright and license notices, including the [earlier MIT notice](LICENSES/MIT.txt).
+Review any separately licensed material before adding it. Earlier MIT grants
+remain valid; see [License](README.md#license).
