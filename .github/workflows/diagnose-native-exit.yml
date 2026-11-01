@@ -1,0 +1,58 @@
+name: Diagnose native guest exit hang
+on:
+  push:
+    branches: [diagnose/native-exit-20261101]
+    paths:
+      - '.github/workflows/diagnose-native-exit.yml'
+      - 'tools/reference/eden_ns2/diagnose_native_exit.py'
+permissions:
+  contents: read
+concurrency:
+  group: diagnose-native-exit-20261101
+  cancel-in-progress: false
+jobs:
+  diagnostic:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/eden-cxx-cache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install shared prerequisites and debugger
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          package_names="$(python3 tools/reference/eden_ns2/build_native_engine.py --print-packages)"
+          read -r -a packages <<< "$package_names"
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${packages[@]}" gdb
+      - uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: ${{ github.workspace }}/eden-cxx-cache
+          key: eden-cli-ubuntu26-clang-e2f285ab-v1-b244712e092ff42d8445242425a19160944d7a38
+          restore-keys: |
+            eden-cli-ubuntu26-clang-e2f285ab-v1-
+      - name: Run bounded diagnostic and retain first failure
+        shell: bash
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.cache.outputs.cache-matched-key }}
+        run: |
+          set -euo pipefail
+          echo "NX2_EXIT_DIAGNOSTIC_CACHE=$CACHE_MATCHED_KEY"
+          python3 tools/reference/eden_ns2/diagnose_native_exit.py \
+            --engine-dir "$RUNNER_TEMP/engine" \
+            --output "$RUNNER_TEMP/exit-diagnostic" --trials 20 \
+            | tee "$RUNNER_TEMP/exit-diagnostic-build.log"
+      - name: Preserve diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-exit-diagnostic
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/exit-diagnostic/
+            ${{ runner.temp }}/exit-diagnostic-build.log
