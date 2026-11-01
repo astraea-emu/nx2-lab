@@ -46,15 +46,18 @@ def request_template(command: int, send_pid: bool, payload: bytes) -> bytes:
     return bytes(result)
 
 
-def compile_segments(tool_prefix: str = "aarch64-linux-gnu-") -> tuple[bytes, bytes, bytes]:
+def compile_segments(
+    tool_prefix: str = "aarch64-linux-gnu-", *,
+    source: Path = ROOT / "native_sm_probe.S",
+    linker: Path = ROOT / "native_sm_probe.ld",
+) -> tuple[bytes, bytes, bytes]:
     """Run only the host assembler/linker and extract three bounded sections."""
     with tempfile.TemporaryDirectory(prefix="nx2-sm-guest-") as temporary:
         directory = Path(temporary)
         obj, elf = directory / "guest.o", directory / "guest.elf"
-        subprocess.run([tool_prefix + "as", "-o", str(obj),
-                        str(ROOT / "native_sm_probe.S")], check=True)
+        subprocess.run([tool_prefix + "as", "-o", str(obj), str(source)], check=True)
         subprocess.run([tool_prefix + "ld", "--build-id=none", "-T",
-                        str(ROOT / "native_sm_probe.ld"), "-o", str(elf), str(obj)],
+                        str(linker), "-o", str(elf), str(obj)],
                        check=True)
         header = elf.read_bytes()[:64]
         if (header[:7] != b"\x7fELF\x02\x01\x01" or
@@ -87,7 +90,8 @@ def build_ipc_nso(sections: tuple[bytes, bytes, bytes]) -> bytes:
     return bytes(header) + b"".join(segments)
 
 
-def verify_ipc_fixture(nso: bytes, npdm: bytes) -> None:
+def read_ipc_segments(nso: bytes) -> tuple[bytes, bytes, bytes]:
+    """Validate the bounded uncompressed NSO envelope and return its pages."""
     if len(nso) != NSO_HEADER + 3 * PAGE or nso[:16] != b"NSO0" + bytes(12):
         raise ValueError("unexpected uncompressed IPC NSO header")
     for index in range(3):
@@ -100,15 +104,19 @@ def verify_ipc_fixture(nso: bytes, npdm: bytes) -> None:
             raise ValueError("IPC segment hash mismatch")
     if nso[0x40:0x60] != hashlib.sha256(nso[NSO_HEADER:]).digest():
         raise ValueError("IPC build ID mismatch")
+    return tuple(nso[NSO_HEADER + index * PAGE:NSO_HEADER + (index + 1) * PAGE]
+                 for index in range(3))
+
+
+def verify_ipc_fixture(nso: bytes, npdm: bytes) -> None:
+    _, rodata, data = read_ipc_segments(nso)
     expected = (request_template(0, True, bytes(8)),
                 request_template(1, False, b"set\0\0\0\0\0"),
                 request_template(1, False, bytes(8)))
-    rodata = nso[NSO_HEADER + PAGE:NSO_HEADER + 2 * PAGE]
     if rodata[:192] != b"".join(expected):
         raise ValueError("IPC request differs from independently checked libnx format")
     if b"\0".join(field.encode() for field in FIELDS) + b"\0" not in rodata:
         raise ValueError("IPC observed-field order differs from wire contract")
-    data = nso[NSO_HEADER + 2 * PAGE:]
     if data[:4 * len(FIELDS)] != b"\xff" * (4 * len(FIELDS)):
         raise ValueError("IPC result fields must start as unobserved sentinels")
     if npdm != build_extended_npdm():

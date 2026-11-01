@@ -3,10 +3,10 @@
 A research lab for Switch 2 emulation: original guest workloads, repeatable
 external-runtime tests and a small AArch64 CPU/memory correctness oracle.
 
-Synthetic guests now complete checked service-manager IPC and natural exit
-in a pinned Eden build on Linux. NX2 has no verified guest-produced frame,
-developer SDK or game compatibility. The next milestone is an editable
-original graphics sample with independently checked pixels.
+Original guests complete checked service-manager IPC, VI2 client lifecycle
+and natural exit in a pinned Eden build on Linux. NX2 has no verified
+guest-produced frame, developer SDK or game compatibility. The next milestone
+is an editable original graphics sample with independently checked pixels.
 
 ## Build and run
 
