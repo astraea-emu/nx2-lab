@@ -1,6 +1,11 @@
 name: P0 original native ExeFS end-to-end runtime probe
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/p0-eden-native-exefs-runtime.yml'
+      - 'tools/reference/eden_ns2/overlay_eden_exit.py'
   pull_request:
     paths:
       - '.github/workflows/p0-eden-native-exefs-runtime.yml'
@@ -73,11 +78,16 @@ jobs:
             eden-cli-ubuntu26-clang-e2f285ab-v1-
       - name: Initialize bounded ccache
         shell: bash
+        env:
+          EDEN_CACHE_MATCHED_KEY: ${{ steps.eden-cache.outputs.cache-matched-key }}
+          EDEN_CACHE_EXACT_HIT: ${{ steps.eden-cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           mkdir -p "$CCACHE_DIR"
           ccache --max-size=1200M
           ccache --zero-stats
+          echo "NX2_EDEN_CACHE matched_key=$EDEN_CACHE_MATCHED_KEY exact_hit=$EDEN_CACHE_EXACT_HIT"
+          clang++ --version
       - name: Fetch the exact GPL Eden source revision (no external binaries)
         shell: bash
         env:
@@ -155,6 +165,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          eden_configure_started=$SECONDS
           cmake -S "$RUNNER_TEMP/eden" -B "$RUNNER_TEMP/eden-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -162,6 +173,7 @@ jobs:
             -DENABLE_CUBEB=OFF -DENABLE_LIBUSB=OFF -DYUZU_ROOM=OFF \
             -DENABLE_OPENGL=OFF -DYUZU_CMD=ON -DYUZU_TESTS=OFF \
             -DBUILD_TESTING=OFF -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
+          echo "NX2_EDEN_TIMING configure_seconds=$((SECONDS - eden_configure_started))"
           cpu_count=$(nproc)
           build_jobs=$(( cpu_count < 2 ? cpu_count : 2 ))
           memory_kib=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
@@ -170,7 +182,9 @@ jobs:
             build_jobs=4
           fi
           echo "NX2_EDEN_BUILD_RESOURCES cpu=$cpu_count memory_kib=$memory_kib available_kib=$available_memory_kib jobs=$build_jobs"
+          eden_build_started=$SECONDS
           cmake --build "$RUNNER_TEMP/eden-build" --target yuzu-cmd --parallel "$build_jobs"
+          echo "NX2_EDEN_TIMING build_seconds=$((SECONDS - eden_build_started))"
           test -x "$RUNNER_TEMP/eden-build/bin/eden-cli"
           ccache --show-stats
           echo NX2_NATIVE_EXEFS_REAL_EDEN_CLI_BUILT
@@ -184,6 +198,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          eden_controls_started=$SECONDS
           trial() {
             local which="$1" logfile="$2"
             local trial_home="$RUNNER_TEMP/xdg-$which"
@@ -214,6 +229,7 @@ jobs:
           set -e
           test "$baseline_check" -eq 0
           test "$ipc_check" -eq 0
+          echo "NX2_EDEN_TIMING controls_seconds=$((SECONDS - eden_controls_started))"
           echo NX2_NATIVE_BASELINE_AND_IPC_CONTROLS_PASS
       - name: Preserve independent original runtime logs
         if: always()
