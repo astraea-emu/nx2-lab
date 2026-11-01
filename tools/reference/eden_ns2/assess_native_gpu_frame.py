@@ -366,7 +366,7 @@ def animation_patterns(eden_revision: str) -> tuple:
          r"VI2 present token=(0x[0-9a-f]+), image=(\d+), slot=(\d+), mask=(0x[0-9a-f]+), result=(0x[0-9a-f]+)",
          "VI2 present token="),
         ("composite_fence", r"Service\.NVDRV <Info> "
-         r"core/hle/service/nvdrv/devices/nvdisp_disp0\.cpp:112:Composite: "
+         r"core/hle/service/nvdrv/devices/nvdisp_disp0\.cpp:114:Composite: "
          r"Native composite waits for syncpoint=(\d+)/(\d+), current=(\d+)",
          "Native composite waits for syncpoint="),
     )

@@ -478,7 +478,7 @@ def animation_log(variant=0):
                    f"Native display buffer retired: slot={slot}, mask=0x7fff\n".encode())
         presented = (b"Service.AM <Debug> core/hle/service/am/service/graphics_supervisor.cpp:965:PresentClientBuffer: " +
                      f"VI2 present token=0x32495632584e0001, image={slot + 1}, slot={slot}, mask={queued_mask:#x}, result=0x0\n".encode())
-        fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:112:Composite: " +
+        fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:114:Composite: " +
                  f"Native composite waits for syncpoint=5/{target}, current={target}\n".encode())
         composite = SUBMITTED.replace(b"0x80004000", (b"0x80004000", b"0x80006000")[slot])
         result += (animation_marker("BEGIN") + availability(0x7FFF) +
@@ -537,14 +537,34 @@ class AnimationTests(unittest.TestCase):
         self.assertFalse(self.check(captures=(*self.captures[:2], bytes(bad), self.captures[3])))
 
     def test_source_attributed_events_are_required_and_unique(self):
+        fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:114:Composite: "
+                 b"Native composite waits for syncpoint=5/2, current=2\n")
         for block in (NATIVE_SUBMIT, PUSHBUFFER, TSG_BIND, TSG_UNBIND, STAGES, DRAW,
-                      LOWERED, CAPTURED, SUBMITTED, availability(0x7FFE),
+                      LOWERED, CAPTURED, SUBMITTED, fence, availability(0x7FFE),
                       animation_marker("BEGIN"), animation_marker("END")):
             for replacement in (b"", block + block, b"host echo " + block,
                                 block.replace(b".cpp:", b".cpp:9", 1)):
                 if replacement != block:
                     with self.subTest(block=block[:50], replacement=replacement[:25]):
                         self.assertFalse(self.check(self.log.replace(block, replacement, 1)))
+
+    def test_actual_composite_fence_record_and_exact_source_location(self):
+        # Captured from candidate run 41338103384. Clang reports the closing
+        # line of this multiline LOG_INFO invocation, not the enclosing loop.
+        observed = ("\0\x1b[0;37m[   0.617262] Service.NVDRV <Info> "
+                    "core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:114:Composite: "
+                    "Native composite waits for syncpoint=1/2, current=2\x1b[0m")
+        line = gpu.BOUNDARY.sub("", observed)
+        for revision in (gpu.BASELINE_SHA, gpu.CANDIDATE_SHA):
+            pattern = next(pattern for name, pattern, _ in gpu.animation_patterns(revision)
+                           if name == "composite_fence")
+            self.assertEqual(pattern.fullmatch(line).groups(), ("1", "2", "2"))
+            for before, after in ((":114:", ":112:"), (":114:", ":113:"),
+                                  ("nvdisp_disp0.cpp", "other.cpp"), (":Composite:", ":Present:"),
+                                  ("<Info>", "<Debug>"), ("syncpoint=1/2", "syncpoint=1/-2"),
+                                  (", current=2", ""), ("current=2", "current=2 trailing")):
+                with self.subTest(revision=revision, after=after):
+                    self.assertIsNone(pattern.fullmatch(line.replace(before, after)))
 
     def test_capture_must_complete_before_the_next_guest_write_phase(self):
         parts = self.log.split(animation_marker("BEGIN"))
@@ -559,7 +579,7 @@ class AnimationTests(unittest.TestCase):
     def test_compositor_may_finish_before_present_returns_and_first_poll(self):
         parts = self.log.split(animation_marker("BEGIN"))
         first = parts[1]
-        fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:112:Composite: "
+        fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:114:Composite: "
                  b"Native composite waits for syncpoint=5/2, current=2\n")
         capture = fence + SUBMITTED + CAPTURED
         retired = (b"Service.AM <Debug> core/hle/service/am/service/graphics_supervisor.cpp:858:RefreshReleasedBuffers: "

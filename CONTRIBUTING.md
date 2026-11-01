@@ -92,6 +92,8 @@ GPU fences and display release, complete cleanup and natural exit. A fixed
 capture allowance is not proof of completion. Exit 0 and
 `NX2_ORIGINAL_GPU_ANIMATION_PASS` identify a complete passing trial. Each output
 retains four separate captures, callback records, stdout and the engine log.
+This option is experimental: [Status](docs/STATUS.md) records the shutdown
+failure currently blocking qualification.
 
 ## External-runtime changes
 
