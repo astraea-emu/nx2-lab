@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-only
+# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Apply explicitly audited GPL-side Eden process-exit/SDL lifecycle experiment.
 
-Never vendor or distribute modified Eden GPL source through the MIT NX2 tree.
+Keep modified external Eden source in its separate, source-pinned checkout.
 This applies only to the pinned GPL checkout in an ephemeral CI runner.
 """
 from __future__ import annotations

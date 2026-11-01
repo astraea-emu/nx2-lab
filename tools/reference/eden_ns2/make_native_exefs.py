@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-only
+# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Generate a deterministic, original ARM64 ExeFS/extended-NPDM test fixture.
 
 The guest only emits one source-authored debug message and invokes ExitProcess.

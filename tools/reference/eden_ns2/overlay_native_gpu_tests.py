@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-only
+# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Reconcile 29 native GPU cases in an exact, ephemeral Eden GPL checkout.
 
 Only the upstream test file is written. Two DMA-contract cases remain verbatim

@@ -1,4 +1,5 @@
-/* SPDX-License-Identifier: MIT
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
  * Original NX2 ARM64 service-manager probe, no SDK or console code.
  * Request format independently checked with public libnx cmifMakeRequest at
  * b156b4774fb2df7b93402169509266da7547fc4c. Expected replies describe frozen

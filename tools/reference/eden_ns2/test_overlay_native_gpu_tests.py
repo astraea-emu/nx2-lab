@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-only
+# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Overlay regressions using original checks and, when supplied, real Eden source.
 
 Set NX2_EDEN_SOURCE to an exact frozen Git checkout for the source-backed cases.

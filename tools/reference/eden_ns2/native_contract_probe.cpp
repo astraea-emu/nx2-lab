@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GPL-3.0-only
+// Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 // NX2-authored source-qualification test. Linked ONLY to frozen upstream
 // Eden-NS2 header implementations in ephemeral CI; no vendor code is copied.
 #include <array>

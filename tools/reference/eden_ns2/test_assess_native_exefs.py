@@ -1,4 +1,5 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-only
+# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Acceptance regressions for observed Eden runtime false-positive cases."""
 import contextlib
 import io

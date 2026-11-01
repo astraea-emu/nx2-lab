@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-only
+# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Check local Markdown links, core CTest, Python regressions and fixture assembly.
 
 Requires Python 3.9+, Git, CMake, a C++23 compiler and GNU AArch64 binutils.

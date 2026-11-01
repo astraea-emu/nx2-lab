@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-only
+# Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
 """Qualify the original synthetic native guest's observed SM IPC round trip.
 
 Only records attributed to the frozen emulator's debug SVC count. The guest

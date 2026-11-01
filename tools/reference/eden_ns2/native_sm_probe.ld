@@ -1,4 +1,7 @@
-/* SPDX-License-Identifier: MIT — original bounded NX2 guest layout. */
+/* SPDX-License-Identifier: GPL-3.0-only
+ * Earlier MIT-licensed material retains that permission; see LICENSES/MIT.txt.
+ * Original bounded NX2 guest layout.
+ */
 OUTPUT_ARCH(aarch64)
 ENTRY(_start)
 PHDRS {
