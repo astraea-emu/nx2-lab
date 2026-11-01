@@ -48,7 +48,7 @@ jobs:
           test "$(stat -c '%s' "$RUNNER_TEMP/nexo/tests/generated/hello.nro")" = "24636"
           test -f "$RUNNER_TEMP/nexo/tests/programs/nro_hello/main.c"
           echo 'NX2_NRO_VERIFIED_SOURCE_FIXTURE_PASS'
-      - name: Verify original fixture is safe and malformed variants fail closed
+      - name: Check original fixture layout and reject malformed variants
         shell: bash
         env:
           PYTHONPATH: tools/reference/eden_ns2

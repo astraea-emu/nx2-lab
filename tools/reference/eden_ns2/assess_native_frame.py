@@ -336,8 +336,11 @@ def main() -> int:
     try:
         if args.log.stat().st_size > MAX_LOG_SIZE or args.capture.stat().st_size != CAPTURE_SIZE:
             parser.exit(1, "NX2_NATIVE_FRAME_INPUT_SIZE_NOT_VALID\n")
-        return 0 if assess(args.log.read_bytes(), args.process_rc,
-                           args.capture.read_bytes(), args.variant) else 1
+        with args.log.open("rb") as source:
+            raw = source.read(MAX_LOG_SIZE + 1)
+        with args.capture.open("rb") as source:
+            capture = source.read(CAPTURE_SIZE + 1)
+        return 0 if assess(raw, args.process_rc, capture, args.variant) else 1
     except OSError as error:
         parser.exit(1, f"NX2_NATIVE_FRAME_INPUT_UNAVAILABLE: {error}\n")
 

@@ -206,9 +206,12 @@ def main() -> int:
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--exit", required=True, type=int, dest="process_rc")
     args = parser.parse_args()
-    if args.log.stat().st_size > MAX_LOG_SIZE:
-        parser.exit(1, "NX2_NATIVE_VI2_LOG_LIMIT_EXCEEDED\n")
-    return 0 if assess(args.log.read_bytes(), args.process_rc) else 1
+    try:
+        with args.log.open("rb") as source:
+            raw = source.read(MAX_LOG_SIZE + 1)
+    except OSError as error:
+        parser.exit(1, f"NX2_NATIVE_VI2_LOG_UNAVAILABLE: {error}\n")
+    return 0 if assess(raw, args.process_rc) else 1
 
 
 if __name__ == "__main__":

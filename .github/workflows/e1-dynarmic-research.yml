@@ -46,6 +46,7 @@ jobs:
             -DNX2_PINNED_DYNARMIC_SOURCE="$RUNNER_TEMP/dynarmic"
       - name: Build and compare original AArch64 instruction prefixes
         run: |
+          set -euo pipefail
           cmake --build "$RUNNER_TEMP/nx2-e1-build" --target nx2_dynarmic_owned_trace --parallel 2
           "$RUNNER_TEMP/nx2-e1-build/nx2_dynarmic_owned_trace" | tee "$RUNNER_TEMP/nx2-e1-results.txt"
           for claim in \

@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 
 MAX_IMAGE = 2 * 1024 * 1024
+MAX_REPORT = 64 * 1024
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -31,6 +32,28 @@ def no_duplicate_pairs(pairs):
             raise Refused("duplicate_json_key:" + key)
         d[key] = value
     return d
+
+
+def read_bounded(source, maximum, label):
+    raw = source.read(maximum + 1)
+    insist(len(raw) <= maximum, label + "_too_large")
+    return raw
+
+
+def bounded_input_negative_cases():
+    for label, maximum in (("report", MAX_REPORT), ("code", MAX_IMAGE), ("data", MAX_IMAGE)):
+        class OversizedSource:
+            def read(self, size):
+                insist(size == maximum + 1, "image_input_read_was_not_bounded")
+                return bytes(size)
+        try:
+            read_bounded(OversizedSource(), maximum, label)
+        except Refused as error:
+            if str(error) != label + "_too_large":
+                raise
+        else:
+            raise Refused("oversized_image_input_admitted:" + label)
+    return 3
 
 
 def parse_address(v):
@@ -133,15 +156,19 @@ def main():
     parser.add_argument("--data", required=True, type=Path)
     args = parser.parse_args()
     try:
-        insist(args.report.stat().st_size <= 65536, "report_too_large")
+        insist(args.report.stat().st_size <= MAX_REPORT, "report_too_large")
         insist(args.code.stat().st_size <= MAX_IMAGE, "code_too_large")
         insist(args.data.stat().st_size <= MAX_IMAGE, "data_too_large")
-        report = json.loads(args.report.read_text(),
-                            object_pairs_hook=no_duplicate_pairs)
-        code = args.code.read_bytes()
-        data = args.data.read_bytes()
+        with args.report.open("rb") as source:
+            report = json.loads(read_bounded(source, MAX_REPORT, "report").decode("utf-8"),
+                                object_pairs_hook=no_duplicate_pairs)
+        with args.code.open("rb") as source:
+            code = read_bounded(source, MAX_IMAGE, "code")
+        with args.data.open("rb") as source:
+            data = read_bounded(source, MAX_IMAGE, "data")
         accepted = check(report, code, data)
         negatives = negative_cases(report, code, data)
+        input_negatives = bounded_input_negative_cases()
     except (OSError, Refused, ValueError, TypeError) as e:
         parser.exit(2, "NX2_HBX_IMAGE_REFUSED:" + str(e) + "\n")
     print("NX2_HBX_ORIGINAL_IMAGE_ADMISSION_PASS")
@@ -149,6 +176,7 @@ def main():
                 "hbx_source_profile", "original_binary_admission"):
         print(key + "=" + accepted[key])
     print("hbx_image_negative_cases=" + str(negatives))
+    print("hbx_image_bounded_input_negative_cases=" + str(input_negatives))
     print("console_code_executed=0")
 
 

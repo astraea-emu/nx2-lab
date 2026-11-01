@@ -2,7 +2,7 @@
 """Independent source-owned synthetic ELF64 input and mutation negatives."""
 import struct
 from profile_external_elf import (
-    ExternalElfRefused, SOURCE_MESSAGE, SOURCE_PREFIX, make_owned_image,
+    MAX_ELF, ExternalElfRefused, SOURCE_MESSAGE, SOURCE_PREFIX, make_owned_image, read_elf,
 )
 
 CODE = (SOURCE_PREFIX + b'\x00' * (0x20 - len(SOURCE_PREFIX)) +
@@ -67,8 +67,21 @@ def check():
         except (ExternalElfRefused, struct.error):
             continue
         raise AssertionError('bad synthetic ELF accepted: ' + name)
+    # A bounded read must reject a file that grows past its cap, without first
+    # reading the entire file. The reader rejects an omitted/unbounded request.
+    class OversizedSource:
+        def read(self, size):
+            assert size == MAX_ELF + 1
+            return bytes(size)
+    try:
+        read_elf(OversizedSource())
+    except ExternalElfRefused as error:
+        assert str(error) == 'elf_size'
+    else:
+        raise AssertionError('oversized external ELF input admitted')
     print('NX2_EXTERNAL_ELF_NEGATIVES_PASS')
     print('invalid_elf_cases=' + str(len(cases)))
+    print('bounded_input_negative_cases=1')
     print('literal_target_mutations=refused')
     print('third_party_code_required_for_negatives=no')
 

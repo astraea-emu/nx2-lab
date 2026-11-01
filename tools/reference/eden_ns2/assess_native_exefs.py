@@ -23,6 +23,16 @@ GUEST_OUTPUT = re.compile(
     LOG_PREFIX + r"Debug\.Emulated <Info> core/hle/kernel/svc/svc_debug_string\.cpp:\d+:"
     r"OutputDebugString: " + re.escape(MESSAGE)
 )
+# The invalid META control must not reach any guest debug SVC, even when its
+# payload differs from the positive fixture's exact message.
+ANY_GUEST_OUTPUT = re.compile(
+    LOG_PREFIX + r"Debug\.Emulated <Info> core/hle/kernel/svc/svc_debug_string\.cpp:\d+:"
+    r"OutputDebugString: .*"
+)
+ANY_GUEST_SVC = re.compile(
+    LOG_PREFIX + r"Kernel\.SVC <(?:Trace|Debug|Info|Warning|Error|Critical)> "
+    r"core/hle/kernel/svc/[^:\s]+:\d+:[^:\s]+:.*"
+)
 GUEST_EXIT = re.compile(
     LOG_PREFIX + r"Kernel\.SVC <Info> core/hle/kernel/svc/svc_process\.cpp:\d+:"
     r"ExitProcess: Process \d+ exiting"
@@ -98,6 +108,9 @@ def report(raw: bytes, label: str) -> str:
 def assess(valid_raw: bytes, invalid_raw: bytes, valid_rc: int, invalid_rc: int) -> bool:
     print(f"NX2_NATIVE_VALID_PROCESS_RC={valid_rc}")
     print(f"NX2_NATIVE_INVALID_PROCESS_RC={invalid_rc}")
+    if len(valid_raw) > MAX_LOG_SIZE or len(invalid_raw) > MAX_LOG_SIZE:
+        print("NX2_NATIVE_EXEFS_LOG_LIMIT_EXCEEDED")
+        return False
     good = report(valid_raw, "VALID")
     bad = report(invalid_raw, "INVALID")
     lines = source_lines(valid_raw)
@@ -111,7 +124,7 @@ def assess(valid_raw: bytes, invalid_raw: bytes, valid_rc: int, invalid_rc: int)
     # The negative fixture changes only META magic: an unrelated loader or
     # initialization failure is not the expected NPDM rejection.
     invalid_diagnostic = expected_npdm_rejection(invalid_raw)
-    invalid_executed = bool(GUEST_OUTPUT.search(bad) or GUEST_EXIT.search(bad))
+    invalid_executed = bool(ANY_GUEST_OUTPUT.search(bad) or ANY_GUEST_SVC.search(bad))
     invalid_fault = bool(EXECUTION_FAILURE.search(bad))
     # SDL_APP_FAILURE is 1. A signal or timeout after an error is not rejection.
     invalid_clean = invalid_rc == 1 and not invalid_fault and not invalid_executed
@@ -140,9 +153,13 @@ def main() -> int:
     p.add_argument("--valid-exit",type=int,required=True)
     p.add_argument("--invalid-exit",type=int,required=True)
     args=p.parse_args()
-    good,bad=args.valid_log.read_bytes(),args.invalid_log.read_bytes()
-    if len(good)>MAX_LOG_SIZE or len(bad)>MAX_LOG_SIZE:
-        p.exit(1,"NX2_NATIVE_EXEFS_LOG_LIMIT_EXCEEDED\n")
+    try:
+        with args.valid_log.open("rb") as source:
+            good = source.read(MAX_LOG_SIZE + 1)
+        with args.invalid_log.open("rb") as source:
+            bad = source.read(MAX_LOG_SIZE + 1)
+    except OSError as error:
+        p.exit(1, f"NX2_NATIVE_EXEFS_LOG_UNAVAILABLE: {error}\n")
     return 0 if assess(good,bad,args.valid_exit,args.invalid_exit) else 1
 
 if __name__=="__main__":

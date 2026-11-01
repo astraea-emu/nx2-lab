@@ -2,8 +2,11 @@
 """Acceptance regressions for observed Eden runtime false-positive cases."""
 import contextlib
 import io
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
+import assess_native_exefs
 from assess_native_exefs import assess, MESSAGE
 
 CLASSIFICATION = (
@@ -183,6 +186,43 @@ class NativeExeFsAssessmentTests(unittest.TestCase):
     def test_invalid_metadata_cannot_execute_guest_before_rejection(self):
         self.assertFalse(self.run_case(b=BAD + OUTPUT)[0])
         self.assertFalse(self.run_case(b=BAD + EXIT)[0])
+
+    def test_invalid_metadata_rejects_every_real_guest_debug_payload(self):
+        for payload in (b"another guest ran", b"", b"NX2_IPC_COMPLETE"):
+            guest = OUTPUT.replace(MESSAGE.encode(), payload)
+            for bad in (guest + BAD, BAD + guest):
+                with self.subTest(payload=payload, before=bad.startswith(guest)):
+                    ok, report = self.run_case(b=bad)
+                    self.assertFalse(ok)
+                    self.assertIn("NX2_NATIVE_INVALID_EXECUTED_GUEST=1", report)
+                    self.assertIn("NX2_NATIVE_INVALID_CLEAN_REJECTION=0", report)
+
+    def test_invalid_metadata_cannot_reach_a_non_exit_guest_svc(self):
+        activity = (b"Kernel.SVC <Trace> core/hle/kernel/svc/svc_ipc.cpp:43:"
+                    b"SendSyncRequest: handle=000103fe\n")
+        ok, report = self.run_case(b=BAD + activity)
+        self.assertFalse(ok)
+        self.assertIn("NX2_NATIVE_INVALID_EXECUTED_GUEST=1", report)
+
+    def test_oversized_api_input_is_rejected_before_parsing(self):
+        with patch.object(assess_native_exefs, "MAX_LOG_SIZE", 16):
+            ok, report = self.run_case()
+        self.assertFalse(ok)
+        self.assertIn("NX2_NATIVE_EXEFS_LOG_LIMIT_EXCEEDED", report)
+
+    def test_cli_bounds_reads_even_if_file_size_changes(self):
+        streams = (io.BytesIO(bytes(100)), io.BytesIO(bytes(100)))
+        with patch.object(assess_native_exefs, "MAX_LOG_SIZE", 16), \
+                patch.object(Path, "open", side_effect=streams), \
+                patch.object(streams[0], "read", wraps=streams[0].read) as good_read, \
+                patch.object(streams[1], "read", wraps=streams[1].read) as bad_read, \
+                patch("sys.argv", ["assess_native_exefs.py", "--valid-log", "good.log",
+                                   "--invalid-log", "bad.log", "--valid-exit", "0",
+                                   "--invalid-exit", "1"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(assess_native_exefs.main(), 1)
+            good_read.assert_called_once_with(17)
+            bad_read.assert_called_once_with(17)
 
     def test_ansi_and_nul_noise_preserves_actual_source_log_records(self):
         ok, report = self.run_case(g=b"noise\0\n\x1b[0;37m" + GOOD + b"\x1b[0m")

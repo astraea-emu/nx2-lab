@@ -147,6 +147,9 @@ def find_issue(repo, token):
         matches += [i for i in issues if i.get("title") == TITLE and "pull_request" not in i]
         if len(issues) < 100:
             break
+    else:
+        raise RadarError("Issue lookup reached its 200-item limit; refusing to publish "
+                         "without a complete search")
     if len(matches) > 1:
         raise RadarError("Duplicate radar issues found; review manually")
     return matches[0] if matches else None

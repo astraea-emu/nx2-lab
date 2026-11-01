@@ -87,6 +87,9 @@ def print_log(label: str, raw: bytes) -> None:
 def assess(good_log: bytes, bad_log: bytes, good_exit: int, bad_exit: int) -> bool:
     print(f"NX2_GOOD_NRO_PROCESS_EXIT={good_exit}")
     print(f"NX2_BAD_NRO_PROCESS_EXIT={bad_exit}")
+    if len(good_log) > MAX_LOG_SIZE or len(bad_log) > MAX_LOG_SIZE:
+        print("NX2_EDEN_LOG_OVERSIZE_REFUSED")
+        return False
     print_log("GOOD", good_log)
     print_log("BAD", bad_log)
     messages = [message for _, message in guest_messages(good_log)]
@@ -133,10 +136,13 @@ def main() -> int:
     parser.add_argument("--good-exit", type=int, required=True)
     parser.add_argument("--bad-exit", type=int, required=True)
     args = parser.parse_args()
-    good = args.good_log.read_bytes()
-    bad = args.bad_log.read_bytes()
-    if len(good) > MAX_LOG_SIZE or len(bad) > MAX_LOG_SIZE:
-        parser.exit(1, "NX2_EDEN_LOG_OVERSIZE_REFUSED\n")
+    try:
+        with args.good_log.open("rb") as source:
+            good = source.read(MAX_LOG_SIZE + 1)
+        with args.bad_log.open("rb") as source:
+            bad = source.read(MAX_LOG_SIZE + 1)
+    except OSError as error:
+        parser.exit(1, f"NX2_EDEN_LOG_UNAVAILABLE: {error}\n")
     return 0 if assess(good, bad, args.good_exit, args.bad_exit) else 1
 
 

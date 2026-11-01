@@ -27,16 +27,17 @@ if(BUILD_TESTING)
   add_test(NAME source_owned_service_stop_contract COMMAND nx2_service_stop_test)
   add_test(NAME source_owned_service_stop_image COMMAND nx2lab run-owned
     ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/owned-aarch64-service.nx2o)
-  set_tests_properties(source_owned_service_stop_image PROPERTIES
-    PASS_REGULAR_EXPRESSION "stop=service_request_before_retirement")
   add_executable(nx2_image_test tests/owned_image_test.cpp)
   target_link_libraries(nx2_image_test PRIVATE nx2core)
   add_test(NAME source_owned_executable_image_contract COMMAND nx2_image_test)
   add_executable(nx2_memory_test tests/memory_test.cpp)
   target_link_libraries(nx2_memory_test PRIVATE nx2core)
   add_test(NAME source_owned_guest_memory_contract COMMAND nx2_memory_test)
-  find_package(Python3 COMPONENTS Interpreter)
+  find_package(Python3 3.9 COMPONENTS Interpreter)
   if(Python3_Interpreter_FOUND)
+    add_test(NAME source_owned_fixture_cli_contract COMMAND
+      ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/owned_fixture_test.py
+      $<TARGET_FILE:nx2lab>)
     add_test(NAME evidence_manifest_contract COMMAND
       ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/verify_evidence.py
       ${CMAKE_CURRENT_SOURCE_DIR}/evidence/owned-aarch64-fixture.json)

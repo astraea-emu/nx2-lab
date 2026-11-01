@@ -1,8 +1,11 @@
 """Original NX2 unit tests for guest-log parser; no emulator required."""
 import contextlib
 import io
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 
+import assess_eden_guest
 from assess_eden_guest import assess
 
 GUEST_PREFIX = b"Debug.Emulated <Info> core/hle/kernel/svc/svc_debug_string.cpp:25:OutputDebugString: "
@@ -91,6 +94,25 @@ class GuestAssessmentTest(unittest.TestCase):
         self.assertTrue(verdict)
         self.assertIn("[NUL]", output)
         self.assertIn("NX2_EDEN_SOURCE_AUTHORED_GUEST_EXECUTION_PASS", output)
+
+    def test_oversize_input_is_refused_before_log_parsing(self):
+        with patch.object(assess_eden_guest, "MAX_LOG_SIZE", 16):
+            verdict, output = self.run_assessment(GOOD, BAD)
+        self.assertFalse(verdict)
+        self.assertIn("NX2_EDEN_LOG_OVERSIZE_REFUSED", output)
+
+    def test_cli_caps_both_reads_even_when_files_grow(self):
+        streams = (io.BytesIO(bytes(100)), io.BytesIO(bytes(100)))
+        with patch.object(assess_eden_guest, "MAX_LOG_SIZE", 16), \
+                patch.object(Path, "open", side_effect=streams), \
+                patch.object(streams[0], "read", wraps=streams[0].read) as good_read, \
+                patch.object(streams[1], "read", wraps=streams[1].read) as bad_read, \
+                patch("sys.argv", ["assess_eden_guest.py", "--good-log", "good.log",
+                                   "--bad-log", "bad.log", "--good-exit", "124", "--bad-exit", "1"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(assess_eden_guest.main(), 1)
+            good_read.assert_called_once_with(17)
+            bad_read.assert_called_once_with(17)
 
 
 if __name__ == "__main__":

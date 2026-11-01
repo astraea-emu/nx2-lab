@@ -2,6 +2,7 @@
 """Reject false IPC evidence, wrong replies and incomplete guest cleanup."""
 import contextlib
 import io
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -91,6 +92,15 @@ class NativeIpcAssessmentTests(unittest.TestCase):
             with self.subTest(after=after):
                 self.assertFalse(self.run_case(GOOD.replace(before, after))[0])
 
+    def test_handles_require_real_index_generation_and_reserved_bits(self):
+        for field, original in ((b"sm_handle", b"02008001"),
+                                (b"service_handle", b"02108002")):
+            for value in (1, 2, 0x00008400, 0x40008001, 0xFFFF8000, 0xFFFF8001):
+                with self.subTest(field=field, value=value):
+                    self.assertFalse(self.run_case(GOOD.replace(
+                        field + b"=" + original,
+                        field + f"={value:08x}".encode()))[0])
+
     def test_guest_failure_marker_is_fatal_even_after_complete(self):
         for failure in (PREFIX + b"NX2_IPC_FAILURE\n", b"NX2_IPC_FAILURE\n"):
             with self.subTest(failure=failure):
@@ -125,6 +135,11 @@ class NativeIpcAssessmentTests(unittest.TestCase):
             with self.subTest(log=log[:100]):
                 self.assertFalse(self.run_case(log)[0])
 
+    def test_extra_unattributed_classification_or_exit_is_not_ignored(self):
+        for event in (CLASSIFIED, EXIT):
+            with self.subTest(event=event):
+                self.assertFalse(self.run_case(GOOD + b"Host echo: " + event)[0])
+
     def test_wrong_source_file_cannot_supply_guest_records(self):
         self.assertFalse(self.run_case(GOOD.replace(b"svc_debug_string.cpp", b"fixture_echo.cpp"))[0])
 
@@ -156,6 +171,9 @@ class NativeIpcAssessmentTests(unittest.TestCase):
             b"UndefinedBehaviorSanitizer", b"runtime error: misaligned access",
             b"Service <Warning> Using auto stub fallback!",
             b"Debug <Critical> Unknown / unimplemented GetService",
+            b"Service.SM <Warning> core/hle/service/sm/sm.cpp:1:Call: (STUBBED) called",
+            b"Service.SM <Warning> runtime fallback selected",
+            b"Service.SM <Info> Not implemented",
         ):
             with self.subTest(diagnostic=diagnostic):
                 self.assertFalse(self.run_case(GOOD + diagnostic + b"\n")[0])
@@ -165,19 +183,36 @@ class NativeIpcAssessmentTests(unittest.TestCase):
         self.assertTrue(self.run_case(log)[0])
 
     def test_binary_safe_logs_preserve_real_records_and_visible_nul_diagnostics(self):
-        raw = b"noise\xff\0\n" + b"".join(
+        raw = b"".join(
             b"\0\x1b[0;37m" + line + b"\0\x1b[0m\n" for line in GOOD.splitlines()
         )
         ok, output = self.run_case(raw)
         self.assertTrue(ok)
-        self.assertIn("[NUL]", output)
+        self.assertIn("NX2_NATIVE_IPC_LOG_NUL_COUNT=48", output)
         self.assertNotIn("\x1b", output)
+
+    def test_interior_controls_cannot_repair_fields_sources_or_error_severity(self):
+        for log in (GOOD.replace(b"connect_rc=00000000", b"connect_rc=0000\x1b[0m0000"),
+                    GOOD.replace(b"Debug.Emulated", b"Debug.\x1b[0mEmulated"),
+                    GOOD + b"Service.SM <Er\0ror> failed\n", GOOD + b"noise\xff\n"):
+            with self.subTest(log=log[-100:]):
+                self.assertFalse(self.run_case(log)[0])
 
     def test_oversize_input_is_refused_before_parsing(self):
         with patch.object(assess_native_ipc, "MAX_LOG_SIZE", 16):
             ok, output = self.run_case()
         self.assertFalse(ok)
         self.assertIn("NX2_NATIVE_IPC_LOG_LIMIT_EXCEEDED", output)
+
+    def test_cli_caps_the_actual_read(self):
+        stream = io.BytesIO(bytes(100))
+        with patch.object(assess_native_ipc, "MAX_LOG_SIZE", 16), \
+                patch.object(Path, "open", return_value=stream), \
+                patch.object(stream, "read", wraps=stream.read) as read, \
+                patch("sys.argv", ["assess_native_ipc.py", "--log", "oversized.log", "--exit", "0"]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(assess_native_ipc.main(), 1)
+            read.assert_called_once_with(17)
 
 
 if __name__ == "__main__":

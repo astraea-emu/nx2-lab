@@ -14,7 +14,10 @@ from pathlib import Path
 import re
 
 MAX_LOG_SIZE = 20 * 1024 * 1024
-ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+# Only logger boundary decoration is removable. Interior controls must not
+# repair a malformed source tag, reply field, or diagnostic into valid evidence.
+BOUNDARY = re.compile(r"^(?:[\0 \t]|\x1b\[[0-9;]*m)+|(?:[\0 \t]|\x1b\[[0-9;]*m)+$")
+CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f\ufffd]")
 LOG_PREFIX = r"(?:\[\s*\d+(?:\.\d+)?\]\s*)?"
 CLASSIFIED = re.compile(
     LOG_PREFIX + r"Core <Info> core/core\.cpp:\d+:Load: "
@@ -36,7 +39,7 @@ EXECUTION_FAILURE = re.compile(
     re.IGNORECASE,
 )
 STUB_FAILURE = re.compile(
-    r"Using auto stub fallback!|Unknown\s*/\s*unimplemented",
+    r"stub|fallback|unimplemented|not implemented",
     re.IGNORECASE,
 )
 
@@ -91,22 +94,26 @@ def assess(raw: bytes, process_rc: int) -> bool:
     if len(raw) > MAX_LOG_SIZE:
         print("NX2_NATIVE_IPC_LOG_LIMIT_EXCEEDED")
         return False
-    normalized = ANSI_ESCAPE.sub("", raw.decode("utf-8", "replace"))
-    lines = normalized.splitlines()
+    normalized = raw.decode("utf-8", "replace")
+    lines = [BOUNDARY.sub("", line.removesuffix("\r"))
+             for line in normalized.split("\n")]
     report(lines, len(raw), raw.count(bytes([0])))
     classifications = []
     exits = []
     completions = []
     records = []
     protocol_errors = []
-    for index, raw_line in enumerate(lines):
-        # The frozen logger places NUL separators at record boundaries. Do not
-        # delete embedded NULs or malformed bytes inside a protocol record.
-        line = raw_line.strip("\0 \t")
+    for index, line in enumerate(lines):
+        if CONTROL.search(line):
+            protocol_errors.append(f"corrupted record at line {index}")
         if CLASSIFIED.fullmatch(line):
             classifications.append(index)
+        elif "Switch 2 program: using the 12 GiB memory layout" in line:
+            protocol_errors.append(f"unattributed classification at line {index}")
         if GUEST_EXIT.fullmatch(line):
             exits.append(index)
+        elif "ExitProcess:" in line:
+            protocol_errors.append(f"unattributed process exit at line {index}")
         if "NX2_IPC" not in line:
             continue
         output = GUEST_OUTPUT.fullmatch(line)
@@ -130,10 +137,11 @@ def assess(raw: bytes, process_rc: int) -> bool:
     values_match = all(value is None or values.get(name) == value for name, value in FIELDS)
     sm_handle = values.get("sm_handle", 0)
     service_handle = values.get("service_handle", 0)
-    # 0xffffffff is the guest's unobserved-value sentinel, never handle evidence.
-    handles_observed = (sm_handle not in (0, 0xFFFFFFFF) and
-                        service_handle not in (0, 0xFFFFFFFF) and
-                        sm_handle != service_handle)
+    # Frozen KHandleTable: 15-bit index (<1024), nonzero 15-bit generation,
+    # two reserved high bits clear. Pseudo-handles are not acquired sessions.
+    handles_observed = (sm_handle != service_handle and all(
+        handle >> 30 == 0 and (handle & 0x7FFF) < 1024 and
+        ((handle >> 15) & 0x7FFF) != 0 for handle in (sm_handle, service_handle)))
     events_in_order = (
         len(classifications) == len(completions) == len(exits) == 1 and
         bool(records) and classifications[0] < records[0][0] and
@@ -167,9 +175,12 @@ def main() -> int:
     parser.add_argument("--log", required=True, type=Path)
     parser.add_argument("--exit", required=True, type=int, dest="process_rc")
     args = parser.parse_args()
-    if args.log.stat().st_size > MAX_LOG_SIZE:
-        parser.exit(1, "NX2_NATIVE_IPC_LOG_LIMIT_EXCEEDED\n")
-    return 0 if assess(args.log.read_bytes(), args.process_rc) else 1
+    try:
+        with args.log.open("rb") as source:
+            raw = source.read(MAX_LOG_SIZE + 1)
+    except OSError as error:
+        parser.exit(1, f"NX2_NATIVE_IPC_LOG_UNAVAILABLE: {error}\n")
+    return 0 if assess(raw, args.process_rc) else 1
 
 
 if __name__ == "__main__":
