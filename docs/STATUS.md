@@ -4,8 +4,8 @@
 
 NX2 is useful as a regression lab. Its own `nx2lab` executable is a bounded
 CPU/memory oracle; the guest results below belong to separately built engines.
-The [active milestone](PLAN.md) is an editable original graphics sample with
-independently checked captured pixels.
+An original graphical guest now produces independently verified pixels. The
+[active milestone](PLAN.md) completes its reproducible setup and edit/run loop.
 
 ## Measured results
 
@@ -15,19 +15,28 @@ independently checked captured pixels.
 | Original synthetic ExeFS | Guest message and real `ExitProcess`, exit 0. Malformed META separately rejected with Core error 4 / Frontend 0007-0004, exit 1, before guest execution. | [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
 | Original service-manager guest | All **21 observed reply fields** checked by ARM64 guest code; initialization, `set` acquisition, expected empty-name error `0xc15`, two handles closed and natural exit 0. | [Same runtime run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
 | Original VI2 lifecycle guest | **215 observed fields**; duplicate/missing-client refusals; 127-byte rejection without consumption; 128-byte notification `0x4`, then clear; all buffer guards intact, seven handles closed and natural exit 0. | [PR #39](https://github.com/astraea-emu/nx2-lab/pull/39) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41261352557) |
+| Original image guest | Two CPU-drawn colour variants, **281 observed fields** each, exact **1920×1080 BGRA/alpha** capture comparisons, eight handles closed and natural exit 0. | [PR #41](https://github.com/astraea-emu/nx2-lab/pull/41) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41268515967) |
 | Eden NRO lifecycle | Original executes but faults on return and times out (124). Labeled four-byte exit-thunk variant plus lifecycle repair exits 0. Malformed input rejects (1) **with an AES assertion**. | [PR #28](https://github.com/astraea-emu/nx2-lab/pull/28) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41229946626) |
 
 Eden results use revision `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c` with
 explicitly recorded build/lifecycle repairs. The GPU run used
 `EDEN_NATIVE_STRICT=1`; the restored cases comprise 24 unchanged bodies and
 five compatibility adaptations. Compile-time DMA exclusions are outside the
-62-case result. The three ExeFS/IPC inputs produced no assertion, execution
-fault or unexpected stub.
+62-case result. The ExeFS, IPC and image guests produced no assertion,
+execution fault or unexpected stub.
 
-The VI2 run recorded five empty-path, one missing-title and three
+The VI2 and image runs recorded five empty-path, one missing-title and three
 uninitialized-network errors before guest entry, plus the one known
 manager-getter warning. Its checker bounds these exact diagnostics by source,
 count and phase; unexpected errors, stubs, faults and timeouts fail acceptance.
+
+The image checker requires the real saved-capture callback before guest
+cleanup and checks every pixel against a logical reference independent of
+the guest's block layout. Each changed-colour capture fails the other variant's
+reference. The first runtime trial exposed two checker source-line mistakes;
+[PR #41](https://github.com/astraea-emu/nx2-lab/pull/41) retains that failure and
+the exact corrections. The [local runner](../CONTRIBUTING.md#original-image-trial-linux)
+records fresh evidence and timings but requires an already-built engine.
 
 [Evidence](SOURCES.md) preserves earlier full records, source/input hashes,
 applied changes, raw-report digests and earlier failures. Dated proposals
@@ -35,7 +44,8 @@ remain historical; [Plan](PLAN.md) defines the current next step.
 
 ## Limits and blockers
 
-- **Graphics:** no verified guest-produced frame. Two DMA contracts, production
+- **Graphics:** the verified path presents a CPU-drawn image through Vulkan
+  on Linux/Lavapipe. Guest GPU shader execution, two DMA contracts, production
   macro/JIT paths and the complete upstream suite remain unqualified.
 - **Loader:** malformed NRO identification asserts in `core/crypto/aes_util.cpp`.
   Original parser bounds need a verified fix and sanitizer-backed regression;

@@ -3,10 +3,10 @@
 A research lab for Switch 2 emulation: original guest workloads, repeatable
 external-runtime tests and a small AArch64 CPU/memory correctness oracle.
 
-Original guests complete checked service-manager IPC, VI2 client lifecycle
-and natural exit in a pinned Eden build on Linux. NX2 has no verified
-guest-produced frame, developer SDK or game compatibility. The next milestone
-is an editable original graphics sample with independently checked pixels.
+Original ARM64 guests complete checked IPC and display a CPU-drawn image
+through a pinned Eden build on Linux. Both original and edited images match
+every expected captured pixel and exit naturally. This establishes one
+presentation path; NX2 has no developer SDK or verified game compatibility.
 
 ## Build and run
 
@@ -24,7 +24,8 @@ ctest --test-dir build -C Debug --output-on-failure
 With a Windows multi-configuration generator, use `build/Debug/nx2lab.exe`.
 The demo executes two original AArch64 instructions and reports `x0=43`.
 `run-owned` accepts the project's small NX2OWNED fixture format. These commands
-exercise the local oracle; external engines use separate research workflows.
+exercise the local oracle. The [original image trial](CONTRIBUTING.md#original-image-trial-linux)
+uses a separately built external engine; [Status](docs/STATUS.md) records its evidence and limits.
 
 ## Project guide
 
