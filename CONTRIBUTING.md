@@ -79,6 +79,20 @@ The clear-only image must fail both triangle references. Exit 0 and
 directory retains the original input hashes, shader snapshots, captures and logs.
 Current qualification and remaining limits are in [Status](docs/STATUS.md).
 
+To run four frames with two reused image buffers and an edited vertex sequence:
+
+```sh
+python3 tools/reference/eden_ns2/run_native_frame.py --gpu-animation --both
+```
+
+Both variants keep the same original shaders. The guest changes vertices and
+alternates buffers; all four completed images must match independent references.
+The checker requires each saved capture before the next memory update, checked
+GPU fences and display release, complete cleanup and natural exit. A fixed
+capture allowance is not proof of completion. Exit 0 and
+`NX2_ORIGINAL_GPU_ANIMATION_PASS` identify a complete passing trial. Each output
+retains four separate captures, callback records, stdout and the engine log.
+
 ## External-runtime changes
 
 A reference probe, fixture, assessor or overlay change needs its relevant

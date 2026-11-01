@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Independent triangle image controls; synthetic logs are not runtime evidence."""
 import contextlib
+from functools import lru_cache
 import io
 import struct
 import unittest
@@ -387,6 +388,235 @@ class TrianglePixelsTests(unittest.TestCase):
         for x, y in ((-1, 0), (16, 0), (0, -1), (0, 9)):
             with self.assertRaises(ValueError):
                 gpu.logical_pixel(x, y, 0)
+
+
+ANIMATION_MASKS = (
+    MASK,
+    ("................", "................", "...###########..", "...########.....",
+     "...######.......", "...####.........", "...#............", "................", "................"),
+    ("................", "................", "................", "..###########...",
+     "..########......", "..######........", "..####..........", "..#.............", "................"),
+    ("................", "................", ".###########....", ".########.......",
+     ".######.........", ".####...........", ".#..............", "................", "................"),
+)
+
+
+@lru_cache(maxsize=8)
+def animation_image(variant, frame):
+    # Hand-enumerated screen masks; no guest input or assessor geometry import.
+    selected = ((0, 1, 2, 3), (0, 3, 2, 1))[variant][frame]
+    pixels = bytearray()
+    for row in ANIMATION_MASKS[selected]:
+        line = b"".join((bytes((255, 0, 255, 255)) if cell == "#" else
+                         bytes((48, 32, 16, 255))) * 120 for cell in row)
+        pixels.extend(line * 120)
+    return bytes.fromhex("000002000000000000000000800738042028") + pixels
+
+
+def animation_fields(variant, frame, *, final=False):
+    fields = observed_fields(variant)
+    overrides = {"image_checksum": 0x402B5DC5, "present_lo": (0x7FFE, 0x7FFD)[frame % 2],
+                 "poll_count": 20, "poll_queued_count": 2, "poll_released_count": 18}
+    cleanup = False
+    for index, (name, value) in enumerate(fields):
+        if name == "unbind_display_transport":
+            cleanup = True
+        fields[index] = (name, 0xFFFFFFFF if cleanup and not final and name != "fail_step"
+                         else overrides.get(name, value))
+    fields.extend((("animation_frame", frame), ("animation_slot", frame % 2),
+                   ("second_memory_id", 12), ("second_image_id", 2)))
+    for name, command, words in (("second_memory_create", 111, 2),
+                                 ("second_memory_bind", 114, 1), ("second_image_create", 429, 2),
+                                 ("second_pool_create", 315, 1), ("second_pool_destroy", 314, 1),
+                                 ("second_image_destroy", 430, 1), ("second_memory_destroy", 112, 1)):
+        fields.extend((name + "_" + part, 0xFFFFFFFF if not final and "destroy" in name else value)
+                      for part, value in (("transport", 0), ("header0", command + 16),
+                                          ("header1", words), ("result", 0)))
+    fields.extend((("animation_target_address_lo", 0x8006000 + (frame % 2) * 8192),
+                   ("animation_target_address_hi", 0)))
+    gpu_records = gpu_fields()
+    checksums = ((0x9FD0D419, 0xA47DD7D9, 0xD29CD296, 0x555B0019),
+                 (0x9FD0D419, 0x555B0019, 0xD29CD296, 0xA47DD7D9))
+    overrides = {"gpu_reserve_image_word00": 4, "gpu_buffer_checksum": checksums[variant][frame],
+                 "gpu_counter_before_lo": frame * 2, "gpu_counter_after_lo": (frame + 1) * 2,
+                 "gpu_submit_word05": (frame + 1) * 2}
+    cleanup = False
+    for name, value in gpu_records:
+        if name == "gpu_free_buffer_transport":
+            cleanup = True
+        fields.append((name, 0xFFFFFFFF if cleanup and not final else overrides.get(name, value)))
+    fields.extend(("gpu_map_second_image_" + part, value) for part, value in (
+        ("transport", 0), ("header0", 0), ("header1", 12), ("pad0", 0), ("pad1", 0),
+        ("magic", 0x4F434653), ("version", 0), ("result_lo", 0), ("result_hi", 0),
+        ("nv_result", 0), ("guard_before", 0xA5A5A5A5)))
+    fields.extend((f"gpu_map_second_image_word{index:02d}", value)
+                  for index, value in enumerate((1, 0, 12, 4096, 0, 0, 8192, 0, 8192, 1)))
+    fields.append(("gpu_map_second_image_guard_after", 0xA5A5A5A5))
+    return fields
+
+
+def animation_marker(name):
+    return PREFIX + b"NX2_ANIMATION_FRAME_" + name.encode() + b"\n"
+
+
+def availability(mask):
+    return (b"Service.AM <Debug> core/hle/service/am/service/graphics_supervisor.cpp:808:GetClientAvailability: "
+            b"VI2 client availability token=0x32495632584e0001, layer=1, mask=" +
+            hex(mask).encode() + b", result=0x0\n")
+
+
+def animation_log(variant=0):
+    result = FRONTEND + CLASSIFIED + RENDERER + marker("BEGIN") + MANAGER
+    for frame in range(4):
+        slot, target = frame % 2, (frame + 1) * 2
+        queued_mask = (0x7FFE, 0x7FFD)[slot]
+        queued = QUEUED.replace(b"image=1, slot=0", f"image={slot + 1}, slot={slot}".encode())
+        queued = queued.replace(b"4294967295/0", f"5/{target}".encode())
+        push = PUSHBUFFER if not slot else PUSHBUFFER.replace(
+            b"200a0200,00000001,00000000", b"200a0200,00000001,00002000")
+        retired = (b"Service.AM <Debug> core/hle/service/am/service/graphics_supervisor.cpp:858:RefreshReleasedBuffers: " +
+                   f"Native display buffer retired: slot={slot}, mask=0x7fff\n".encode())
+        presented = (b"Service.AM <Debug> core/hle/service/am/service/graphics_supervisor.cpp:965:PresentClientBuffer: " +
+                     f"VI2 present token=0x32495632584e0001, image={slot + 1}, slot={slot}, mask={queued_mask:#x}, result=0x0\n".encode())
+        fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:112:Composite: " +
+                 f"Native composite waits for syncpoint=5/{target}, current={target}\n".encode())
+        composite = SUBMITTED.replace(b"0x80004000", (b"0x80004000", b"0x80006000")[slot])
+        result += (animation_marker("BEGIN") + availability(0x7FFF) +
+                   (gpu_marker("BEGIN") + TSG_BIND if frame == 0 else b"") +
+                   NATIVE_SUBMIT + push + gpu_marker("SUBMITTED") +
+                   (STAGES + DRAW + LOWERED if frame == 0 else b"") + gpu_marker("FENCE_OBSERVED") +
+                   marker("PRESENT_BEGIN") + queued + presented + marker("PRESENTED") +
+                   availability(queued_mask) * 2 + fence + composite + CAPTURED + retired +
+                   availability(0x7FFF) * 18 +
+                   b"".join(record(name, value) for name, value in animation_fields(variant, frame)) +
+                   animation_marker("END"))
+    return (result + marker("CLEANUP_BEGIN") + gpu_marker("CLEANUP") + TSG_UNBIND +
+            b"".join(record(name, value) for name, value in animation_fields(variant, 3, final=True)) +
+            marker("COMPLETE") + EXIT)
+
+
+class AnimationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.captures = tuple(animation_image(0, frame) for frame in range(4))
+        cls.log = animation_log()
+
+    def check(self, log=None, *, captures=None, variant=0, rc=0, revision=gpu.BASELINE_SHA):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return gpu.assess_animation(self.log if log is None else log, rc,
+                self.captures if captures is None else captures, variant, eden_revision=revision)
+
+    def test_both_vertex_sequences_and_both_source_revisions(self):
+        self.assertEqual(len(animation_fields(0, 0)), 674)
+        for variant in (0, 1):
+            log = animation_log(variant)
+            captures = tuple(animation_image(variant, frame) for frame in range(4))
+            self.assertTrue(self.check(log, captures=captures, variant=variant))
+            self.assertTrue(self.check(candidate_log(log), captures=captures, variant=variant,
+                                       revision=gpu.CANDIDATE_SHA))
+
+    def test_independent_masks_are_distinct_and_only_vertex_order_changes(self):
+        self.assertEqual(len(set(self.captures)), 4)
+        self.assertEqual(self.captures[0], image())
+        self.assertEqual(animation_image(1, 1), self.captures[3])
+        self.assertEqual(animation_image(1, 3), self.captures[1])
+        for frame, capture in enumerate(self.captures):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(gpu.verify_animation_pixels(capture, 0, frame))
+                for wrong in range(4):
+                    if wrong != frame:
+                        self.assertFalse(gpu.verify_animation_pixels(capture, 0, wrong))
+
+    def test_stale_reordered_missing_and_corrupt_captures_fail(self):
+        for captures in (self.captures[:3], self.captures + self.captures[:1],
+                         (self.captures[0],) * 4, tuple(reversed(self.captures)),
+                         tuple(animation_image(1, frame) for frame in range(4))):
+            self.assertFalse(self.check(captures=captures))
+        bad = bytearray(self.captures[2])
+        bad[-1] ^= 1
+        self.assertFalse(self.check(captures=(*self.captures[:2], bytes(bad), self.captures[3])))
+
+    def test_source_attributed_events_are_required_and_unique(self):
+        for block in (NATIVE_SUBMIT, PUSHBUFFER, TSG_BIND, TSG_UNBIND, STAGES, DRAW,
+                      LOWERED, CAPTURED, SUBMITTED, availability(0x7FFE),
+                      animation_marker("BEGIN"), animation_marker("END")):
+            for replacement in (b"", block + block, b"host echo " + block,
+                                block.replace(b".cpp:", b".cpp:9", 1)):
+                if replacement != block:
+                    with self.subTest(block=block[:50], replacement=replacement[:25]):
+                        self.assertFalse(self.check(self.log.replace(block, replacement, 1)))
+
+    def test_capture_must_complete_before_the_next_guest_write_phase(self):
+        parts = self.log.split(animation_marker("BEGIN"))
+        parts[1] = parts[1].replace(CAPTURED, b"", 1)
+        parts[2] = CAPTURED + parts[2]
+        self.assertFalse(self.check(animation_marker("BEGIN").join(parts)))
+        self.assertFalse(self.check(self.log.replace(CAPTURED, b"", 1) + CAPTURED))
+        early_gpu = self.log.replace(gpu_marker("BEGIN"), b"", 1).replace(
+            animation_marker("BEGIN"), gpu_marker("BEGIN") + animation_marker("BEGIN"), 1)
+        self.assertFalse(self.check(early_gpu))
+
+    def test_compositor_may_finish_before_present_returns_and_first_poll(self):
+        parts = self.log.split(animation_marker("BEGIN"))
+        first = parts[1]
+        fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:112:Composite: "
+                 b"Native composite waits for syncpoint=5/2, current=2\n")
+        capture = fence + SUBMITTED + CAPTURED
+        retired = (b"Service.AM <Debug> core/hle/service/am/service/graphics_supervisor.cpp:858:RefreshReleasedBuffers: "
+                   b"Native display buffer retired: slot=0, mask=0x7fff\n")
+        first = first.replace(capture, b"", 1).replace(
+            marker("PRESENT_BEGIN"), marker("PRESENT_BEGIN") + capture, 1)
+        first = first.replace(retired, b"", 1).replace(marker("PRESENTED"), retired + marker("PRESENTED"), 1)
+        first = first.replace(availability(0x7FFE) * 2, availability(0x7FFF) * 2, 1)
+        first = first.replace(record("poll_queued_count", 2), record("poll_queued_count", 0), 1)
+        first = first.replace(record("poll_released_count", 18), record("poll_released_count", 20), 1)
+        parts[1] = first
+        self.assertTrue(self.check(animation_marker("BEGIN").join(parts)))
+
+    def test_each_frame_observation_binds_inputs_fences_and_two_objects(self):
+        changes = (("animation_frame", 3), ("animation_slot", 1),
+                   ("animation_target_address_lo", 0x8006001), ("second_memory_id", 4),
+                   ("second_image_id", 1), ("gpu_map_second_image_word02", 4),
+                   ("gpu_buffer_checksum", 0xA47DD7D9), ("gpu_counter_after_lo", 4),
+                   ("gpu_submit_word05", 4), ("gpu_counter_before_lo", 2),
+                   ("gpu_counter_poll_count", 0), ("poll_count", 19),
+                   ("poll_queued_count", 20), ("poll_released_count", 0),
+                   ("close_vi2", 0), ("fail_step", 0xFFFFFFFF))
+        fields = dict(animation_fields(0, 0))
+        for name, value in changes:
+            with self.subTest(name=name):
+                self.assertFalse(self.check(self.log.replace(record(name, fields[name]), record(name, value), 1)))
+
+    def test_missing_reordered_extra_fields_and_incomplete_cleanup_fail(self):
+        block = record("animation_frame", 0) + record("animation_slot", 0)
+        for replacement in (b"", block + block, record("animation_slot", 0) + record("animation_frame", 0),
+                            block + record("unexpected", 0)):
+            self.assertFalse(self.check(self.log.replace(block, replacement, 1)))
+        self.assertFalse(self.check(self.log.replace(record("gpu_close_sync", 0), record("gpu_close_sync", 1))))
+        self.assertFalse(self.check(self.log.replace(record("second_memory_destroy_result", 0),
+                                                     record("second_memory_destroy_result", 0xFFFFFFFF))))
+        self.assertFalse(self.check(self.log[:self.log.index(marker("CLEANUP_BEGIN"))]))
+
+    def test_ownership_and_returned_fence_require_actual_engine_records(self):
+        for before, after in ((b"slot=1, mask=0x7fff", b"slot=0, mask=0x7fff"),
+                              (b"fence=5/4", b"fence=5/2"),
+                              (b"syncpoint=5/4, current=4", b"syncpoint=5/4, current=2"),
+                              (b"address=0x80006000", b"address=0x80004000"),
+                              (b"layer=1, mask=0x7fff", b"layer=2, mask=0x7fff")):
+            with self.subTest(before=before):
+                self.assertFalse(self.check(self.log.replace(before, after, 1)))
+
+    def test_failures_placeholders_wrong_revisions_and_bad_inputs_fail_closed(self):
+        for extra in (b"Shader <Error> unsupported instruction\n", b"unexpected placeholder\n",
+                      b"Assertion Failed\n", gpu_marker("UNREVIEWED"), b"NX2_ANIMATION_FRAME_BEGIN\n"):
+            self.assertFalse(self.check(self.log + extra))
+        for rc in (1, 124, 137):
+            self.assertFalse(self.check(rc=rc))
+        self.assertFalse(self.check(candidate_log(self.log)))
+        self.assertFalse(self.check(revision="main"))
+        for variant in (-1, 2, True, 0.0):
+            self.assertFalse(self.check(variant=variant))
+        self.assertFalse(self.check(captures=b"xxxx"))
 
 
 if __name__ == "__main__":

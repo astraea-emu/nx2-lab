@@ -281,6 +281,37 @@ jobs:
               raise SystemExit('Engine reuse or repeated GPU verification failed')
           print('NX2_GPU_ENGINE_REUSE_AND_REPEAT_PASS')
           PY
+      - name: Repeat four-frame animation and an edited vertex sequence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/reference/eden_ns2/run_native_frame.py \
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-animation" --gpu-animation --both \
+            | tee "$RUNNER_TEMP/native-animation-first.log"
+          python3 tools/reference/eden_ns2/run_native_frame.py \
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-animation" --gpu-animation --both \
+            | tee "$RUNNER_TEMP/native-animation-repeat.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'native-animation'
+          paths = sorted(root.glob('run-*/run-summary.json'))
+          if len(paths) != 2:
+              raise SystemExit('Expected exactly two fresh animation invocations')
+          first, repeat = [json.loads(p.read_text()) for p in paths]
+          if not (first['verified'] and repeat['verified'] and
+                  first['engine_reused'] and repeat['engine_reused'] and
+                  first['eden_revision'] == repeat['eden_revision'] == os.environ['EDEN_REVISION'] and
+                  first['output_directory'] != repeat['output_directory'] and
+                  first['eden_cli_sha256'] == repeat['eden_cli_sha256'] and
+                  first['variants'] == repeat['variants'] and len(first['variants']) == 2 and
+                  all(len(v['frame_sha256']) == len(set(v['frame_sha256'])) == 4 and
+                      all(v['frame_sha256']) for v in first['variants'])):
+              raise SystemExit('Engine reuse or repeated animation verification failed')
+          print('NX2_ANIMATION_ENGINE_REUSE_AND_REPEAT_PASS')
+          PY
       - name: Preserve independent original runtime logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -304,6 +335,7 @@ jobs:
             ${{ runner.temp }}/native-frame/**/*.xvfb
             ${{ runner.temp }}/native-frame/**/fixture.log
             ${{ runner.temp }}/native-frame/**/runtime.log
+            ${{ runner.temp }}/native-frame/**/engine.log
             ${{ runner.temp }}/native-frame/**/assessment.log
             ${{ runner.temp }}/native-frame/**/result.json
             ${{ runner.temp }}/native-frame/**/config.ini
@@ -312,6 +344,9 @@ jobs:
             ${{ runner.temp }}/native-gpu-first.log
             ${{ runner.temp }}/native-gpu-repeat.log
             ${{ runner.temp }}/native-gpu/
+            ${{ runner.temp }}/native-animation-first.log
+            ${{ runner.temp }}/native-animation-repeat.log
+            ${{ runner.temp }}/native-animation/
 
   compare:
     name: identical original inputs and pixels
@@ -338,7 +373,8 @@ jobs:
               root = roots / ('original-native-exefs-logs-' + engine)
               observed[engine] = {}
               for family, variants in (('native-frame', ('variant-0', 'variant-1')),
-                                       ('native-gpu', ('variant-0', 'variant-1', 'clear-only'))):
+                                       ('native-gpu', ('variant-0', 'variant-1', 'clear-only')),
+                                       ('native-animation', ('variant-0', 'variant-1'))):
                   runs = sorted((root / family).glob('run-*'))
                   if len(runs) != 2:
                       raise SystemExit(f'{engine}/{family}: expected two independent runs')
@@ -350,13 +386,15 @@ jobs:
                               provenance['engine']['eden_revision'] == revision):
                           raise SystemExit(f'{engine}/{family}: incorrect engine or failed run')
                       for variant in variants:
-                          for file in ('guest/main', 'guest/main.npdm', 'native-latest-frame.tga'):
+                          captures = (tuple(f'frame-{i}.tga' for i in range(4))
+                                      if family == 'native-animation' else ('native-latest-frame.tga',))
+                          for file in ('guest/main', 'guest/main.npdm', *captures):
                               key = f'{family}/{variant}/{file}'
                               sha = hashlib.sha256((run / variant / file).read_bytes()).hexdigest()
                               previous = observed[engine].setdefault(key, sha)
                               if sha != previous:
                                   raise SystemExit(f'{engine}/{key}: repeat differs')
-              if len(observed[engine]) != 15:
+              if len(observed[engine]) != 27:
                   raise SystemExit('Incomplete original workload comparison')
           if observed['baseline'] != observed['candidate']:
               raise SystemExit('The revisions used different original inputs or produced different pixels')
