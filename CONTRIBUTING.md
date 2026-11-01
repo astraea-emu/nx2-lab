@@ -60,6 +60,11 @@ to select other locations. Changed engine inputs or an interrupted build require
 a fresh engine directory; existing files are never reset or cleaned. The recipe
 records system package versions but does not provide a hermetic toolchain.
 
+`--eden-revision` selects either exact revision recorded in [Status](docs/STATUS.md).
+Use a separate `--engine-dir` for each revision; an existing engine cannot be
+reused across revisions. CI compares separate builds and compiler caches on
+separate runners, and records when a cache was seeded from baseline objects.
+
 To exercise original guest GPU commands and shaders through the same engine:
 
 ```sh

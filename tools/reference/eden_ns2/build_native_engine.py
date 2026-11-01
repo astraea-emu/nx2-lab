@@ -27,7 +27,7 @@ import overlay_eden_exit
 
 BASELINE_SHA = "e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c"
 CANDIDATE_SHA = "b2cef0c0f2e8517673233e22c929918e2c60e654"
-EDEN_SHA = BASELINE_SHA
+EDEN_SHA = CANDIDATE_SHA
 EDEN_REVISIONS = (BASELINE_SHA, CANDIDATE_SHA)
 EDEN_REPO = "https://github.com/0x2593/Eden-NS2.git"
 CAST = "src/video_core/texture_cache/util.cpp"

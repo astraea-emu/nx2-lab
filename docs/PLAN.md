@@ -1,51 +1,53 @@
 # Plan
 
-## Milestone: qualify the original graphics workload on a newer engine
+## Milestone: an original animated guest
 
-The original guest GPU triangle is complete in [Status](STATUS.md): native
-commands, original shaders, both fragment colours, an independent pixel oracle,
-clear-only rejection, saved capture and natural exit. Use that workload to
-check whether the development base can advance without losing verified behaviour.
-
-Compare baseline `e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c` with recorded Eden-NS2
-candidate `b2cef0c0f2e8517673233e22c929918e2c60e654`. Verify its provenance and
-relevant source/dependency changes before building; this is an exact comparison,
-not a claim that the candidate is the latest revision. Retain the baseline
-until the comparison passes and its evidence is reviewed in
-[#21](https://github.com/astraea-emu/nx2-lab/issues/21).
+Use the development revision selected by the [engine comparison](https://github.com/astraea-emu/nx2-lab/pull/45)
+and recorded in [Status](STATUS.md). Advance the original static triangle to a
+bounded animation that repeatedly submits GPU work and reuses display buffers.
+Keep the existing static inputs and their exact captures as regressions.
 
 ## Acceptance
 
-- Build both revisions in separate directories. Record source, dependency,
-  tool and executable identities, and the exact repairs each revision needs.
-- Run byte-identical original ExeFS, NPDM, command, shader and vertex inputs.
-  Both triangles must match every expected pixel, their runtime shader pages
-  must match the originals, and clear-only must fail both triangle references.
-- Preserve native channel/TSG execution, ordered fence processing, the fence
-  passed to VI2, saved capture before cleanup, complete release and natural
-  exit. Unsupported, skipped, substituted or faulting positive work fails.
-- Retain the loader/META, SM, VI2, CPU-image and strict 62-case GPU controls,
-  with the two DMA exclusions explicit. Report the existing NRO return fault
-  and malformed-input AES assertion separately; neither is a passing result.
-- Repeat through the shared command with verified engine reuse and fresh
-  evidence. Review any changed source-log binding against the candidate code;
-  preserve the meaning of every check. If a gate fails, keep the baseline and
-  record the first failing boundary. Change the pin only after qualification.
+- Run an original ARM64 program with a deterministic sequence of changing
+  vertices. The guest must submit native commands and execute its original
+  shaders through the selected engine.
+- Alternate two image buffers for a fixed sequence of at least four
+  presentations, reusing each buffer. Observe release before changing or
+  resubmitting it; check GPU completion,
+  returned fences, VI2 ownership and presentation order.
+- Capture selected completed frames and compare every pixel with an independent
+  expected image. Require distinct correct frame states and reject stale images,
+  wrong frame order and premature buffer reuse. A counter alone is insufficient.
+- Bound the workload, preserve the first failure, release every acquired resource
+  and exit naturally. Repeat with verified engine reuse and fresh evidence.
+- Add an animation option to the existing runner and document one command.
+  Editing the original vertex sequence must change the motion and captures.
+- Preserve the static triangles, clear-only, CPU images, loader/META, SM, VI2
+  and strict 62-case GPU controls. Keep both DMA exclusions and the existing NRO
+  return fault and malformed-input assertion explicit.
 
-After this comparison, the next capability target is an original animated
-guest with repeated submission and checked buffer reuse. Production adoption
-remains **HOLD**: malformed-NRO parsing, host containment, dependency/license
-review and relevant platform qualification remain open. There are no verified
-commercial games or physical Switch 2 measurements. HBX stage 2 remains a
-[secondary regression](https://github.com/astraea-emu/nx2-lab/issues/20).
+After animation passes, add one input interaction to the same program. Then
+choose the next original workload from the first demonstrated limitation.
+Do not expand the small CPU/memory oracle unless a concrete discrepancy needs it.
+
+## Limits before general use
+
+Production adoption remains **HOLD**. Fix and regression-test malformed-NRO
+parser bounds, establish host containment, review dependency licenses, and
+qualify the relevant host runtime platforms. Missing-service placeholders must
+be treated as unsupported behavior, not evidence of working services. The
+candidate's broader shader lowering also needs coverage beyond our small scene.
+There are no verified commercial games or physical Switch 2 measurements.
+HBX stage 2 remains a [secondary regression](https://github.com/astraea-emu/nx2-lab/issues/20).
 
 ## How decisions change
 
 Keep one primary milestone. Review the path when it passes or after two
-focused iterations fail to advance it; record the baseline, evidence, options,
-falsifiable comparison and decision in the existing issue. A reproduced
-safety or licensing conflict triggers immediate review. Revisit allocation
-and outstanding evidence every four weeks without resetting the mission.
+focused iterations fail to advance it; record the baseline, evidence, options
+and decision in [#21](https://github.com/astraea-emu/nx2-lab/issues/21).
+A reproduced safety or licensing conflict triggers immediate review. Revisit
+allocation and outstanding evidence every four weeks without resetting the mission.
 
 The weekly [radar](../.github/workflows/competitive-radar.yml) records selected
 public GitHub metadata in one issue. Commits, stars, screenshots and upstream
