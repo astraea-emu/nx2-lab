@@ -1,19 +1,22 @@
 # Status
 
-**Verified 2026-11-01. Production-engine adoption: HOLD.**
+**Reviewed 2026-11-01. Production-engine adoption: HOLD.**
 
 NX2 is useful as a regression lab. Its own `nx2lab` executable is a bounded
 CPU/memory oracle; the guest results below belong to separately built engines.
 An original guest now draws a triangle with native GPU commands and original
 vertex/fragment shaders. One reproducible Linux command checks both colours,
 the clear-only control and resource cleanup. Both reviewed engine revisions
-preserve these results. The [active milestone](PLAN.md) is an original animated
-guest with repeated submission and checked buffer reuse.
+preserved these results in the recorded comparison. The original animated
+guest now produces the expected four frames on both revisions, but a host
+shutdown fault blocks its [acceptance](PLAN.md). Correct images alone are
+insufficient.
 
 ## Measured results
 
 | Workload | Observed result | Evidence |
 | --- | --- | --- |
+| Original GPU animation — not accepted | Two vertex sequences, four submissions each, two reused buffers and **16 exact captures** across the first invocation on each engine. Baseline variant 0 faulted after guest cleanup and `ExitProcess`; the other three trials exited 0. Fresh repeats remain unqualified. | [Draft PR #46](https://github.com/astraea-emu/nx2-lab/pull/46) · [first runtime](https://github.com/astraea-emu/nx2-lab/actions/runs/41338103384) |
 | Engine comparison | Both revisions passed byte-identical original inputs, all CPU/GPU captures and fresh repeats; loader/META, SM, VI2 and strict GPU controls preserved. Newer revision selected for controlled Linux workloads. | [PR #45](https://github.com/astraea-emu/nx2-lab/pull/45) · [runtime comparison](https://github.com/astraea-emu/nx2-lab/actions/runs/41332269077) · [GPU controls](https://github.com/astraea-emu/nx2-lab/actions/runs/41332269059) |
 | Strict native GPU unit slice | **62 cases / 25,395 assertions**, exit 0, zero failures or skips. **29 restored + 33 existing** cases; two DMA cases remain excluded. | [PR #34](https://github.com/astraea-emu/nx2-lab/pull/34) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41245699243) |
 | Original synthetic ExeFS | Guest message and real `ExitProcess`, exit 0. Malformed META separately rejected with Core error 4 / Frontend 0007-0004, exit 1, before guest execution. | [PR #32](https://github.com/astraea-emu/nx2-lab/pull/32) · [actual run](https://github.com/astraea-emu/nx2-lab/actions/runs/41233784596) |
@@ -76,8 +79,16 @@ remain historical; [Plan](PLAN.md) defines the current next step.
 
 ## Limits and blockers
 
+- **Shutdown:** the first animation comparison recorded a host fault after
+  complete guest cleanup and `ExitProcess` on the baseline. A separate
+  [bounded diagnostic](https://github.com/astraea-emu/nx2-lab/actions/runs/41338985761)
+  reproduced it on trial 5 after four passes. An earlier static green repeat
+  also failed to terminate. The new runner retains the engine log; a successful
+  retry does not establish a repair. Animation stays unaccepted until the
+  cause is addressed and fresh repeats pass.
 - **Graphics:** one untextured triangle and its colour edit are verified on
-  Linux/Lavapipe. Repeated frames and buffer reuse, textures, two DMA contracts,
+  Linux/Lavapipe. Animation and buffer reuse remain under qualification;
+  textures, two DMA contracts,
   production macro/JIT paths and the complete upstream suite remain unqualified.
 - **Loader:** malformed NRO identification asserts in `core/crypto/aes_util.cpp`.
   Original parser bounds need a verified fix and sanitizer-backed regression;

@@ -123,6 +123,9 @@ gpu_field_names:
     gpu_cmif_fields close_as
     gpu_tipc_fields memory_destroy
     gpu_field close_sync
+.if NX2_GPU_ANIMATION
+    gpu_ioctl_fields map_second_image, 10
+.endif
     .byte 0
 .equ GPU_FIELD_COUNT, GPU_FIELD_OFFSET / 4
 
@@ -254,6 +257,10 @@ gpu_fnv1a:
 .global gpu_submit_and_wait
 gpu_submit_and_wait:
     gpu_enter
+.if NX2_GPU_ANIMATION
+    ldr w0, [x22, #F_animation_frame]
+    cbnz w0, .Lgpu_submit_frame
+.endif
     gpu_emit gpu_begin_message
     step 100
     prepare gpu_memory_create_request
@@ -269,6 +276,11 @@ gpu_submit_and_wait:
     ldr w5, [x22, #F_memory_id]
     cmp w4, w5
     b.eq .Lgpu_setup_failed
+.if NX2_GPU_ANIMATION
+    ldr w5, [x22, #F_second_memory_id]
+    cmp w4, w5
+    b.eq .Lgpu_setup_failed
+.endif
     str w4, [x24, #S_MEMORY_ID]
     gpu_mark G_MEMORY
     step 101
@@ -412,6 +424,16 @@ gpu_submit_and_wait:
     gpu_ioctl S_AS_FD, 0xc0284106, 40, map_image
     cbnz w0, .Lgpu_setup_failed
     gpu_require_io_match 40
+.if NX2_GPU_ANIMATION
+    step 119
+    gpu_input gpu_map_second_image_data, 40
+    address x9, gpu_io_input
+    ldr w10, [x22, #F_second_memory_id]
+    str w10, [x9, #8]
+    gpu_ioctl S_AS_FD, 0xc0284106, 40, map_second_image
+    cbnz w0, .Lgpu_setup_failed
+    gpu_require_io_match 40
+.endif
     step 114
     gpu_input gpu_reserve_buffer_data, 24
     gpu_ioctl S_AS_FD, 0xc0184102, 24, reserve_buffer
@@ -426,11 +448,21 @@ gpu_submit_and_wait:
     gpu_ioctl S_AS_FD, 0xc0284106, 40, map_buffer
     cbnz w0, .Lgpu_setup_failed
     gpu_require_io_match 40
+.if NX2_GPU_ANIMATION
+.Lgpu_submit_frame:
+.endif
     step 116
     add x0, x23, #G_counter_before_transport
     bl gpu_query_counter
     cbnz w0, .Lgpu_setup_failed
+.if NX2_GPU_ANIMATION
+    ldr w2, [x22, #F_animation_frame]
+    lsl w2, w2, #1
+    cmp w1, w2
+    b.ne .Lgpu_setup_failed
+.else
     cbnz w1, .Lgpu_setup_failed
+.endif
     step 117
     gpu_input gpu_submit_data, 24
     gpu_ioctl S_CHANNEL_FD, 0xc018481b, 24, submit, 2
@@ -446,7 +478,14 @@ gpu_submit_and_wait:
     ldr w12, [x24, #S_FENCE_ID]
     cmp w10, w12
     b.ne .Lgpu_setup_failed
+.if NX2_GPU_ANIMATION
+    ldr w12, [x22, #F_animation_frame]
+    add w12, w12, #1
+    lsl w12, w12, #1
+    cmp w11, w12
+.else
     cmp w11, #2
+.endif
     b.ne .Lgpu_setup_failed
     str w11, [x24, #S_FENCE_TARGET]
     gpu_emit gpu_submitted_message
@@ -481,6 +520,50 @@ gpu_submit_and_wait:
 .Lgpu_setup_failed:
     gpu_leave
     b failure
+
+.if NX2_GPU_ANIMATION
+/* Each frame begins only after the prior checked VI2 release. The host also
+ * requires the prior saved readback before this mutation in the actual log.
+ */
+.global gpu_prepare_animation_frame
+gpu_prepare_animation_frame:
+    gpu_enter
+    ldr w0, [x22, #F_animation_slot]
+    address x9, image_buffer
+    add x9, x9, x0, lsl #13
+    add x0, x22, #F_animation_target_address_lo
+    str x9, [x0]
+    mov x12, x9
+    mov w10, #0xffff
+    movk w10, #0xff00, lsl #16
+    mov w11, #2048
+1:  str w10, [x9], #4
+    subs w11, w11, #1
+    b.ne 1b
+    mov x0, x12
+    mov w1, #8192
+    bl gpu_fnv1a
+    str w0, [x22, #F_image_checksum]
+
+    ldr w0, [x22, #F_animation_frame]
+    address x9, gpu_animation_inputs
+    add x9, x9, x0, lsl #6
+    address x10, gpu_buffer
+    ldr x11, [x9], #8
+    str x11, [x10, #36]
+    add x10, x10, #0x3000
+    mov w12, #3
+2:  ldp x13, x14, [x9], #16
+    stp x13, x14, [x10], #16
+    subs w12, w12, #1
+    b.ne 2b
+    address x0, gpu_buffer
+    mov w1, #GPU_BUFFER_SIZE
+    bl gpu_fnv1a
+    str w0, [x23, #G_buffer_checksum]
+    gpu_leave
+    ret
+.endif
 
 .global gpu_patch_present
 gpu_patch_present:
@@ -879,7 +962,11 @@ gpu_fifo_data:
 gpu_object_data:
     .word 0xc797, 0, 0, 0
 gpu_reserve_image_data:
+.if NX2_GPU_ANIMATION
+    .word 4, 0x1000, 1, 0
+.else
     .word 2, 0x1000, 1, 0
+.endif
     .quad GPU_IMAGE_VA
 gpu_reserve_buffer_data:
     .word 4, 0x1000, 1, 0
@@ -887,6 +974,11 @@ gpu_reserve_buffer_data:
 gpu_map_image_data:
     .word 1, 0, 0, 0x1000
     .quad 0, 8192, GPU_IMAGE_VA
+.if NX2_GPU_ANIMATION
+gpu_map_second_image_data:
+    .word 1, 0, 0, 0x1000
+    .quad 0, 8192, GPU_IMAGE_VA + 8192
+.endif
 gpu_map_buffer_data:
     .word 1, 0, 0, 0x1000
     .quad 0, GPU_BUFFER_SIZE, GPU_BUFFER_VA
@@ -895,7 +987,11 @@ gpu_submit_data:
     .word 1, 2, 0, 0
 gpu_free_image_data:
     .quad GPU_IMAGE_VA
+.if NX2_GPU_ANIMATION
+    .word 4, 0x1000
+.else
     .word 2, 0x1000
+.endif
 gpu_free_buffer_data:
     .quad GPU_BUFFER_VA
     .word 4, 0x1000
@@ -937,6 +1033,20 @@ gpu_initial_data:
 gpu_initial_data_end:
 .if gpu_initial_data_end - gpu_initial_data != GPU_BUFFER_SIZE
     .error "GPU fixture must contain exactly sixteen KiB of original data"
+.endif
+.if NX2_GPU_ANIMATION
+.balign 16
+.global gpu_animation_inputs
+gpu_animation_inputs:
+    .incbin "gpu-animation-inputs.bin"
+gpu_animation_inputs_end:
+.if gpu_animation_inputs_end - gpu_animation_inputs != 256
+    .error "animation requires four 64-byte target and vertex uploads"
+.endif
+.global gpu_animation_layout
+gpu_animation_layout:
+    .ascii "NX2ANIM1"
+    .word gpu_animation_inputs - field_names, 4, 64, 36
 .endif
 
 .section .data, "aw"

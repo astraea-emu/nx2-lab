@@ -7,6 +7,11 @@ and recorded in [Status](STATUS.md). Advance the original static triangle to a
 bounded animation that repeatedly submits GPU work and reuses display buffers.
 Keep the existing static inputs and their exact captures as regressions.
 
+The first animation comparison produced the expected images but exposed a
+post-exit host fault. Diagnose and repair that failure before accepting this
+milestone or adding input. Preserve the failed run and require fresh repeats;
+a passing retry alone does not close the issue. See [Status](STATUS.md).
+
 ## Acceptance
 
 - Run an original ARM64 program with a deterministic sequence of changing
