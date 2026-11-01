@@ -27,6 +27,13 @@ on:
       - 'tools/reference/eden_ns2/test_make_native_vi2_exefs.py'
       - 'tools/reference/eden_ns2/assess_native_vi2.py'
       - 'tools/reference/eden_ns2/test_assess_native_vi2.py'
+      - 'tools/reference/eden_ns2/native_frame_probe.S'
+      - 'tools/reference/eden_ns2/native_frame_probe.ld'
+      - 'tools/reference/eden_ns2/make_native_frame_exefs.py'
+      - 'tools/reference/eden_ns2/test_make_native_frame_exefs.py'
+      - 'tools/reference/eden_ns2/assess_native_frame.py'
+      - 'tools/reference/eden_ns2/test_assess_native_frame.py'
+      - 'tools/reference/eden_ns2/run_native_frame.py'
 permissions:
   contents: read
 concurrency:
@@ -50,6 +57,7 @@ jobs:
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_overlay_eden_exit.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_ipc.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_vi2.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_frame.py
           echo NX2_NATIVE_EXEFS_UNITS_PASS
       - name: Install frozen Eden command-line build dependencies
         shell: bash
@@ -65,8 +73,8 @@ jobs:
             libavcodec-dev libavfilter-dev libswscale-dev libvulkan-dev \
             vulkan-utility-libraries-dev spirv-tools spirv-headers glslang-tools \
             libsdl3-dev libenet-dev libusb-1.0-0-dev libva-dev libvdpau-dev \
-            libxext-dev libxkbcommon-dev
-      - name: Verify original ARM64 IPC and VI2 fixtures with a real assembler and linker
+            libxext-dev libxkbcommon-dev xvfb xauth mesa-vulkan-drivers vulkan-tools
+      - name: Verify original ARM64 fixtures with a real assembler and linker
         shell: bash
         run: |
           set -euo pipefail
@@ -76,6 +84,7 @@ jobs:
           aarch64-linux-gnu-as --version
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_make_native_ipc_exefs.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_make_native_vi2_exefs.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_make_native_frame_exefs.py
       - name: Restore bounded frozen-source compiler cache
         id: eden-cache
         uses: actions/cache/restore@v4
@@ -257,6 +266,16 @@ jobs:
           test "$vi2_check" -eq 0
           echo "NX2_EDEN_TIMING controls_seconds=$((SECONDS - eden_controls_started))"
           echo NX2_NATIVE_BASELINE_IPC_AND_VI2_CONTROLS_PASS
+      - name: Verify original and edited image pixels through real Vulkan capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          dpkg-query --show xvfb xauth mesa-vulkan-drivers vulkan-tools libsdl3-0
+          python3 tools/reference/eden_ns2/run_native_frame.py \
+            --eden-cli "$RUNNER_TEMP/eden-build/bin/eden-cli" \
+            --eden-source "$RUNNER_TEMP/eden" \
+            --output "$RUNNER_TEMP/native-frame" --both \
+            | tee "$RUNNER_TEMP/native-frame-result.log"
       - name: Preserve independent original runtime logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -271,3 +290,14 @@ jobs:
             ${{ runner.temp }}/native-vi2.log
             ${{ runner.temp }}/native-vi2-assessment.log
             ${{ runner.temp }}/native-vi2-fixture.log
+            ${{ runner.temp }}/native-frame-result.log
+            ${{ runner.temp }}/native-frame/**/provenance.json
+            ${{ runner.temp }}/native-frame/**/vulkan.log
+            ${{ runner.temp }}/native-frame/**/*.xvfb
+            ${{ runner.temp }}/native-frame/**/fixture.log
+            ${{ runner.temp }}/native-frame/**/runtime.log
+            ${{ runner.temp }}/native-frame/**/assessment.log
+            ${{ runner.temp }}/native-frame/**/result.json
+            ${{ runner.temp }}/native-frame/**/config.ini
+            ${{ runner.temp }}/native-frame/**/native-latest-frame.tga
+            ${{ runner.temp }}/native-frame/**/guest/main*
