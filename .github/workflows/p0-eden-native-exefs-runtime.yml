@@ -312,6 +312,55 @@ jobs:
               raise SystemExit('Engine reuse or repeated animation verification failed')
           print('NX2_ANIMATION_ENGINE_REUSE_AND_REPEAT_PASS')
           PY
+      - name: Stress selected animation with fresh execution and natural exits
+        if: matrix.engine == 'candidate'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            log="$RUNNER_TEMP/native-animation-stress-${attempt}.log"
+            if ! python3 tools/reference/eden_ns2/run_native_frame.py \
+                --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+                --output "$RUNNER_TEMP/native-animation-stress" --gpu-animation --both \
+                >"$log" 2>&1; then
+              echo "NX2_ANIMATION_STRESS_FAILED attempt=$attempt; trial not accepted"
+              exit 1
+            fi
+            echo "NX2_ANIMATION_STRESS_COMPLETED attempt=$attempt"
+          done
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'native-animation-stress'
+          paths = sorted(root.glob('run-*/run-summary.json'))
+          if len(paths) != 20:
+              raise SystemExit('Expected exactly 20 independent animation invocations')
+          expected = None
+          identities = set()
+          for path in paths:
+              summary = json.loads(path.read_text())
+              if (not summary['verified'] or not summary['engine_reused'] or
+                  summary['eden_revision'] != os.environ['EDEN_REVISION'] or
+                  len(summary['variants']) != 2 or
+                  summary['output_directory'] != str(path.parent)):
+                  raise SystemExit('Unverified invocation, engine reuse or provenance')
+              identities.add(summary['output_directory'])
+              signature = (
+                  summary['eden_cli_sha256'],
+                  tuple((v['variant'], v['main_sha256'], v['npdm_sha256'],
+                         tuple(v['frame_sha256'])) for v in summary['variants']))
+              if any(v['process_rc'] != 0 or len(v['frame_sha256']) != 4 or
+                     len(set(v['frame_sha256'])) != 4 or
+                     not all(v['frame_sha256']) for v in summary['variants']):
+                  raise SystemExit('Unexpected shutdown, missing capture or stale frames')
+              if expected is None:
+                  expected = signature
+              elif signature != expected:
+                  raise SystemExit('Input, capture, or executable changed across stress runs')
+          if len(identities) != 20:
+              raise SystemExit('Reused or repeated output directory')
+          print('NX2_ANIMATION_SELECTED_STRESS_20_PASS')
+          PY
       - name: Preserve independent original runtime logs
         if: always()
         uses: actions/upload-artifact@v4
