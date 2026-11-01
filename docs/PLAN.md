@@ -5,38 +5,39 @@
 A developer can modify an included original graphical guest, build and run it
 with one documented command, and inspect a real captured frame checked against
 an independent pixel reference. Reuse the external engine build on subsequent
-runs and measure setup/repeat times. This milestone is not yet implemented.
+runs and measure setup/repeat times.
 
-The provisional path uses the pinned external Eden runtime in
-[Status](STATUS.md). Production adoption remains **HOLD** under
-[#21](https://github.com/astraea-emu/nx2-lab/issues/21). The existing CPU, IPC
-and native unit checks support this sample; additional coverage must resolve a
-measured blocker or protect behavior the sample needs.
+The first presentation checkpoint is verified in [Status](STATUS.md): an
+original ARM64 guest draws a checkerboard, presents it through the pinned Eden
+Vulkan renderer, and exits cleanly. Both guest colour variants match every
+captured pixel. The [local command](../CONTRIBUTING.md#original-image-trial-linux)
+reuses an already-built engine; automatic engine setup remains incomplete.
 
-## Next implementation: verify a guest-produced frame
+Production adoption remains **HOLD** under
+[#21](https://github.com/astraea-emu/nx2-lab/issues/21). The CPU, IPC and native
+unit checks support this sample; additional coverage must resolve a measured
+blocker or protect behavior the sample needs.
 
-The original VI2 guest has passed the lifecycle and notification checks in
-[Status](STATUS.md). Next, register a native image/window pool, bind a display
-layer and present a CPU-filled checkerboard with asymmetric corner markers in
-the supported block layout.
+## Next implementation: make the sample easy to reproduce
 
-Use the pinned engine's existing [on-demand renderer capture](https://github.com/0x2593/Eden-NS2/blob/e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c/src/core/hle/service/nvdrv/devices/nvdisp_disp0.cpp)
-with a working Vulkan surface. Fix format, extent, orientation and scaling,
-then compare the fresh capture against an independently generated pixel
-reference. Keep the image backing alive until capture completes, and require
-that completion before guest cleanup and natural exit. Buffer retirement or
-a timed wait alone is not completion evidence.
+Provide one Linux command that obtains the pinned engine, applies the existing
+verified repairs, builds it and runs the image trial. Reuse the existing
+workflow's build procedure without maintaining two independent configurations.
+A second invocation must reuse the engine, create fresh captures and check the
+same pixels. Record actual setup and repeat times, source/input/capture hashes,
+and process results. Keep all generated state outside tracked source files.
 
-Changing a guest-owned color or pattern must change the observed capture;
-a stale or corrupted capture must fail. Retain source revision, commands,
-guest/input and capture hashes, and actual process results. This qualifies a
-presentation path, not GPU shader execution, 3D correctness, hardware ABI
-fidelity or game compatibility.
+Keep the existing acceptance checks: original guest-generated pixels,
+independent complete-image comparison, changed-colour negative controls,
+capture completion before cleanup, all resources released and natural exit.
+No additional engine changes are needed unless reproduction exposes a failure.
 
-The excluded DMA contracts need resolution if the sample reaches them.
+This qualifies a presentation path. Guest GPU shader execution, 3D correctness,
+physical Switch 2 ABI fidelity and game compatibility remain unverified.
+The excluded DMA contracts need resolution if a sample reaches them.
 Malformed-NRO parsing, host containment and cross-platform runtime coverage
-remain production blockers; their current limits stay visible in
-[Status](STATUS.md). HBX stage 2 is a [secondary regression](https://github.com/astraea-emu/nx2-lab/issues/20).
+remain production blockers in [Status](STATUS.md). HBX stage 2 is a
+[secondary regression](https://github.com/astraea-emu/nx2-lab/issues/20).
 
 ## How decisions change
 
