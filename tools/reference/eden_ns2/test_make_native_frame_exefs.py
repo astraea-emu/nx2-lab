@@ -7,7 +7,8 @@ import unittest
 
 from make_native_exefs import NSO_HEADER, build_extended_npdm, build_nso
 from make_native_frame_exefs import (
-    FIELD_COUNT, IMAGE_ADDRESS, IMAGE_SIZE, MARKERS, REQUEST_BYTES, REQUEST_COUNT,
+    FIELD_COUNT, GPU_SEGMENT_ADDRESSES, GPU_SEGMENT_SIZES, IMAGE_ADDRESS, IMAGE_SIZE,
+    MARKERS, REQUEST_BYTES, REQUEST_COUNT,
     REQUEST_SHA256, SEGMENT_ADDRESSES, SEGMENT_SIZES, build_frame_nso,
     compile_frame_segments, read_field_names, read_frame_segments, verify_frame_fixture,
 )
@@ -80,6 +81,10 @@ class NativeFrameFixtureTests(unittest.TestCase):
         self.assertEqual(self.sections, self.assemble(0))
 
     def test_existing_baseline_fixture_and_synthetic_npdm_remain_exact(self):
+        self.assertEqual(hashlib.sha256(self.nso).hexdigest(),
+                         "0272cd78f6aed95464b7980a087ee888459de4fc0922ff7928b02091bd9d465f")
+        self.assertEqual(hashlib.sha256(build_frame_nso(self.alternate)).hexdigest(),
+                         "020cee2fa09e2663ea9c9685d09b79cadc3376cc9c17be34dc45ec348039ff2a")
         self.assertEqual(hashlib.sha256(build_nso()).hexdigest(),
                          "508edcf6870546ed2f67c6ed11f0df3deb0242427ea2b9d7562ae6d015084ed5")
         self.assertEqual(hashlib.sha256(self.npdm).hexdigest(),
@@ -162,6 +167,86 @@ class NativeFrameFixtureTests(unittest.TestCase):
                 verify_frame_fixture(self.nso, self.npdm, variant)
         with self.assertRaisesRegex(ValueError, "baseline NPDM"):
             verify_frame_fixture(self.nso, b"BAD!" + self.npdm[4:], 0)
+
+
+class NativeGpuFixtureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        cls.fixtures = {mode: compile_frame_segments(prefix, variant=mode[0], gpu=True,
+                                                    clear_only=mode[1])
+                        for mode in ((0, False), (1, False), (0, True))}
+        cls.sections = cls.fixtures[0, False]
+        cls.npdm = build_extended_npdm()
+        cls.layout = cls.sections[1].index(b"NX2GPUv1") + 8
+        cls.names, cls.count, cls.record, cls.state, _, cls.buffer, cls.inputs = (
+            struct.unpack_from("<7I", cls.sections[1], cls.layout))
+
+    def changed_section(self, index, offset, replacement):
+        sections = list(self.sections)
+        damaged = bytearray(sections[index])
+        damaged[offset:offset + len(replacement)] = replacement
+        sections[index] = bytes(damaged)
+        return build_frame_nso(tuple(sections), gpu=True)
+
+    def test_all_actual_guests_keep_empty_image_and_unobserved_results(self):
+        for (variant, clear_only), sections in self.fixtures.items():
+            with self.subTest(variant=variant, clear_only=clear_only):
+                nso = build_frame_nso(sections, gpu=True)
+                verify_frame_fixture(nso, self.npdm, variant, gpu=True, clear_only=clear_only)
+                _, _, data = read_frame_segments(nso, gpu=True)
+                self.assertEqual(len(nso), 98560)
+                self.assertEqual(data[0x1000:0x3000], bytes(IMAGE_SIZE))
+                self.assertEqual(data[self.record:self.record + 4 * self.count],
+                                 b"\xff" * (4 * 337))
+                self.assertEqual(data[self.buffer:], bytes(0x4000))
+        self.assertEqual(GPU_SEGMENT_ADDRESSES, (0, 0x4000, 0x10000))
+        self.assertEqual(tuple(map(len, read_frame_segments(
+            build_frame_nso(self.sections, gpu=True), gpu=True))), GPU_SEGMENT_SIZES)
+
+    def test_modes_cannot_be_confused(self):
+        for (variant, clear_only), sections in self.fixtures.items():
+            nso = build_frame_nso(sections, gpu=True)
+            with self.subTest(variant=variant, clear_only=clear_only):
+                with self.assertRaises(ValueError):
+                    verify_frame_fixture(nso, self.npdm, variant, gpu=True,
+                                         clear_only=not clear_only)
+                with self.assertRaises(ValueError):
+                    verify_frame_fixture(nso, self.npdm, 1 - variant, gpu=True,
+                                         clear_only=clear_only)
+                with self.assertRaises(ValueError):
+                    read_frame_segments(nso)
+        self.assertEqual(self.sections[0], self.fixtures[1, False][0])
+        self.assertEqual(self.sections[2], self.fixtures[1, False][2])
+
+    def test_rehashed_commands_shaders_vertices_and_schema_corruption_fail(self):
+        for offset in (self.names, self.inputs, self.inputs + 0x1000,
+                       self.inputs + 0x2084, self.inputs + 0x3000):
+            changed = bytes([self.sections[1][offset] ^ 1])
+            with self.subTest(offset=offset), self.assertRaises(ValueError):
+                verify_frame_fixture(self.changed_section(1, offset, changed), self.npdm,
+                                     0, gpu=True)
+
+    def test_preclaimed_gpu_results_or_host_prefilled_backing_fail(self):
+        for offset in (self.record, self.record + 4 * self.count - 1, self.state,
+                       self.state + 12, 0x1000, self.buffer, self.buffer + 0x3FFF):
+            changed = bytes([self.sections[2][offset] ^ 1])
+            with self.subTest(offset=offset), self.assertRaisesRegex(ValueError, "unobserved"):
+                verify_frame_fixture(self.changed_section(2, offset, changed), self.npdm,
+                                     0, gpu=True)
+
+    def test_rehashed_metadata_cannot_overlap_owned_regions(self):
+        for index, value in ((0, 0xFFFFFFF0), (1, 336), (2, 0x1000),
+                             (3, self.record), (4, 0x8000), (5, self.state),
+                             (5, 0x8000), (6, self.inputs + 1), (6, 0xC000)):
+            with self.subTest(index=index, value=value), self.assertRaises(ValueError):
+                verify_frame_fixture(self.changed_section(
+                    1, self.layout + 4 * index, struct.pack("<I", value)), self.npdm,
+                    0, gpu=True)
+
+    def test_clear_control_requires_gpu_mode(self):
+        with self.assertRaisesRegex(ValueError, "requires the GPU"):
+            compile_frame_segments(clear_only=True)
 
 
 if __name__ == "__main__":

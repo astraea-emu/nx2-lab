@@ -36,6 +36,13 @@ on:
       - 'tools/reference/eden_ns2/assess_native_frame.py'
       - 'tools/reference/eden_ns2/test_assess_native_frame.py'
       - 'tools/reference/eden_ns2/run_native_frame.py'
+      - 'tools/reference/eden_ns2/test_run_native_frame.py'
+      - 'tools/reference/eden_ns2/native_gpu_probe.S'
+      - 'tools/reference/eden_ns2/native_gpu_probe.ld'
+      - 'tools/reference/eden_ns2/native_gpu_commands.py'
+      - 'tools/reference/eden_ns2/test_native_gpu_commands.py'
+      - 'tools/reference/eden_ns2/assess_native_gpu_frame.py'
+      - 'tools/reference/eden_ns2/test_assess_native_gpu_frame.py'
       - 'tools/reference/eden_ns2/test_build_native_engine.py'
 permissions:
   contents: read
@@ -61,6 +68,8 @@ jobs:
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_ipc.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_vi2.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_frame.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_assess_native_gpu_frame.py
+          python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_run_native_frame.py
           python3 -m unittest discover -v -s tools/reference/eden_ns2 -p test_build_native_engine.py
           echo NX2_NATIVE_EXEFS_UNITS_PASS
       - name: Install the shared Linux engine and image prerequisites
@@ -225,6 +234,15 @@ jobs:
               'repeat_engine_seconds': repeat['engine_prepare_seconds'],
               'repeat_total_seconds': repeat['total_seconds']}))
           PY
+      - name: Run original native GPU shaders, two triangle colours and the clear-only control
+        shell: bash
+        run: |
+          set -euo pipefail
+          NX2_EDEN_SOURCE="$RUNNER_TEMP/eden" python3 -m unittest discover -v \
+            -s tools/reference/eden_ns2 -p test_native_gpu_commands.py
+          python3 tools/reference/eden_ns2/run_native_frame.py \
+            --engine-dir "$RUNNER_TEMP" --output "$RUNNER_TEMP/native-gpu" --gpu-triangle --both \
+            | tee "$RUNNER_TEMP/native-gpu.log"
       - name: Preserve independent original runtime logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -253,3 +271,5 @@ jobs:
             ${{ runner.temp }}/native-frame/**/config.ini
             ${{ runner.temp }}/native-frame/**/native-latest-frame.tga
             ${{ runner.temp }}/native-frame/**/guest/main*
+            ${{ runner.temp }}/native-gpu.log
+            ${{ runner.temp }}/native-gpu/

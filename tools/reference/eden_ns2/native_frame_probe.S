@@ -7,6 +7,9 @@
 .ifndef NX2_FRAME_VARIANT
     .set NX2_FRAME_VARIANT, 0
 .endif
+.ifndef NX2_GPU_PROBE
+    .set NX2_GPU_PROBE, 0
+.endif
 .if (NX2_FRAME_VARIANT != 0) && (NX2_FRAME_VARIANT != 1)
     .error "NX2_FRAME_VARIANT must be 0 or 1"
 .endif
@@ -452,7 +455,11 @@ _start:
     tipc_check size_valid, 435, 0, 3
     check_u64 size_valid, 8192
     step 19
+.if NX2_GPU_PROBE
+    bl gpu_initialize
+.else
     bl draw_image
+.endif
 
     step 20
     prepare memory_create_request
@@ -502,9 +509,15 @@ _start:
     capture_u64 available_before
     tipc_check available_before, 212, 0, 3
     check_u64 available_before, 0x7fff
+.if NX2_GPU_PROBE
+    bl gpu_submit_and_wait
+.endif
     step 30
     prepare present_request
     patch_id image_id, 20
+.if NX2_GPU_PROBE
+    bl gpu_patch_present
+.endif
     emit present_begin
     send 7, present
     capture_u64 present
@@ -573,6 +586,7 @@ _start:
  * Native 16x9 GOB addressing swaps offset bits 5/6 relative to legacy tiling.
  * Nothing writes this backing after draw_image returns.
  */
+.if !NX2_GPU_PROBE
 draw_image:
     address x9, image_buffer
     mov x0, x9
@@ -640,6 +654,7 @@ draw_image:
     b.ne 8b
     str w0, [x22, #F_image_checksum]
     ret
+.endif
 
 /* Clear only the 0x100-byte IPC area; retain the remainder of the guest TLS. */
 prepare_request:
@@ -682,6 +697,9 @@ failure:
 cleanup:
     /* This marker precedes every resource/handle release, including failure. */
     emit cleanup_begin
+.if NX2_GPU_PROBE
+    bl gpu_cleanup
+.endif
     release unbind_display_request, 7, unbind_display, 252, 6, 34
     release unregister_request, 7, unregister, 202, 4, 35
     release close_display_request, 7, close_display, 102, 5, 36
@@ -761,6 +779,9 @@ report:
     b 1b
 
 report_end:
+.if NX2_GPU_PROBE
+    bl gpu_report
+.endif
     ldr w0, [x22, #F_fail_step]
     cbnz w0, 1f
     address x0, complete_message
@@ -933,7 +954,7 @@ display_finalize_request:
 frame_config:
     .word NX2_FRAME_VARIANT, 16, 9
     .word 0xff302010
-.if NX2_FRAME_VARIANT == 0
+.if NX2_GPU_PROBE || NX2_FRAME_VARIANT == 0
     .word 0xffe0d0c0
 .else
     .word 0xffa050e0
