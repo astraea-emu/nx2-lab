@@ -9,7 +9,7 @@ permissions:
   contents: read
 concurrency:
   group: diagnose-native-exit-20261101
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   diagnostic:
     runs-on: ubuntu-26.04
@@ -43,7 +43,7 @@ jobs:
           set -euo pipefail
           echo "NX2_EXIT_DIAGNOSTIC_CACHE=$CACHE_MATCHED_KEY"
           python3 tools/reference/eden_ns2/diagnose_native_exit.py \
-            --engine-dir "$RUNNER_TEMP/engine" \
+            --engine-dir "$RUNNER_TEMP" \
             --output "$RUNNER_TEMP/exit-diagnostic" --trials 20 \
             | tee "$RUNNER_TEMP/exit-diagnostic-build.log"
       - name: Preserve diagnostic evidence
