@@ -155,6 +155,26 @@ def run_x11(command: list[str], directory: Path, env: dict[str, str],
     return process.returncode, time.monotonic() - started
 
 
+def verify_vulkan_capabilities(output: Path, icd: Path) -> None:
+    """Retry only a transient X11 connection failure, retaining both preflight logs."""
+    for attempt, log_name in enumerate(("vulkan.log", "vulkan-retry.log")):
+        with tempfile.TemporaryDirectory(prefix="nx2-vulkan-home-") as temporary:
+            rc, _ = run_x11(["vulkaninfo"], output,
+                            vulkan_environment(Path(temporary), icd), log_name, 20)
+        capability_bytes = read_capped(output / log_name, MAX_LOG_SIZE)
+        if len(capability_bytes) > MAX_LOG_SIZE:
+            raise ValueError(f"Vulkan capability log exceeds the input limit: {log_name}")
+        capabilities = capability_bytes.decode("utf-8", "replace")
+        if rc == 0 and all(value in capabilities for value in
+                           ("llvmpipe", "VK_KHR_xlib_surface", "VK_KHR_swapchain")):
+            return
+        if attempt == 0 and rc != 0 and (
+                "XCB failed to connect to the X server" in capabilities):
+            print("NX2_VULKAN_X11_CONNECTION_RETRY=1", flush=True)
+            continue
+        raise ValueError(f"Lavapipe/X11 capabilities not established; inspect {log_name} (rc={rc})")
+
+
 def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
           gpu: bool = False, clear_only: bool = False, animation: bool = False,
           eden_revision: str = EDEN_SHA) -> dict:
@@ -292,16 +312,7 @@ def main() -> int:
                       "icd_sha256": digest(icd),
                       "source_sha256": {p.name: digest(p) for p in sources}}
         (output / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
-        with tempfile.TemporaryDirectory(prefix="nx2-vulkan-home-") as temporary:
-            rc, _ = run_x11(["vulkaninfo"], output,
-                           vulkan_environment(Path(temporary), icd), "vulkan.log", 20)
-        capability_bytes = read_capped(output / "vulkan.log", MAX_LOG_SIZE)
-        if len(capability_bytes) > MAX_LOG_SIZE:
-            raise ValueError("Vulkan capability log exceeds the input limit")
-        capabilities = capability_bytes.decode("utf-8", "replace")
-        if rc != 0 or any(value not in capabilities for value in
-                          ("llvmpipe", "VK_KHR_xlib_surface", "VK_KHR_swapchain")):
-            raise ValueError("Lavapipe/X11 capabilities not established; inspect vulkan.log")
+        verify_vulkan_capabilities(output, icd)
         variants = (0, 1) if args.both else (args.variant,)
         results = [trial(cli, output, icd, args.tool_prefix, variant, gpu=gpu,
                          animation=args.gpu_animation,
