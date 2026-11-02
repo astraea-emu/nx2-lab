@@ -125,6 +125,45 @@ class NativeGpuCommandsTests(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<4I", blob, offset),
                              (0x794D, 0, 0x03800000, 0))
 
+    def test_animation_uploads_only_change_target_and_vertices(self):
+        original = gpu.build_gpu_buffer()
+        positions = (((0, 0), (1, 0), (0, 1), (-1, 0)),
+                     ((0, 0), (-1, 0), (0, 1), (1, 0)))
+        for variant in (0, 1):
+            uploads = gpu.build_animation_inputs(variant)
+            self.assertEqual(len(uploads), 256)
+            reconstructed = bytearray(original)
+            for frame, (dx, dy) in enumerate(positions[variant]):
+                with self.subTest(variant=variant, frame=frame):
+                    upload = uploads[frame * 64:(frame + 1) * 64]
+                    self.assertEqual(upload[56:], bytes(8))
+                    # Match the guest's two bounded writes, independently of
+                    # build_gpu_buffer's full allocation construction.
+                    reconstructed[36:44] = upload[:8]
+                    reconstructed[0x3000:0x3030] = upload[8:56]
+                    result = gpu.build_gpu_buffer(variant, animation_frame=frame)
+                    self.assertEqual(bytes(reconstructed), result)
+                    self.assertEqual(result[0x1000:0x3000], original[0x1000:0x3000])
+                    regs = {method + 4 * n: value for method, args in packets(result)
+                            for n, value in enumerate(args)}
+                    self.assertEqual((regs[0x800], regs[0x804]), (1, (frame % 2) * 8192))
+                    vertices = struct.unpack_from("<12f", result, 0x3000)
+                    for index, (x, y) in enumerate(((2 + dx, 2 + dy),
+                                                  (14 + dx, 2 + dy), (2 + dx, 7 + dy))):
+                        self.assertAlmostEqual(8 * vertices[4 * index] + 8, x, places=6)
+                        self.assertAlmostEqual(4.5 * vertices[4 * index + 1] + 4.5, y, places=6)
+                        self.assertEqual(vertices[4 * index + 2:4 * index + 4], (0.5, 1))
+        self.assertNotEqual(gpu.build_animation_inputs(0), gpu.build_animation_inputs(1))
+        self.assertEqual(gpu.build_gpu_buffer(0, animation_frame=1),
+                         gpu.build_gpu_buffer(1, animation_frame=3))
+
+    def test_existing_static_inputs_remain_exact(self):
+        expected = {(0, False): "c623432a76e1396dbb780be7699e8d33d8078aec1693ce30d44e55159d828c02",
+                    (1, False): "c88f70a5f4ff175b4b982f9238fbdc451caadbc0cff273e84dd71eb79278efe2",
+                    (0, True): "42b3fe9d9042c5a45d960dd496af037d1b0ff79eaa9f9fdcc93bef992af17181"}
+        for (variant, clear), digest in expected.items():
+            self.assertEqual(hashlib.sha256(gpu.build_gpu_buffer(variant, clear)).hexdigest(), digest)
+
     def test_rejects_unsupported_modes(self):
         for variant in (-1, 2, True, 0.0, "0", None):
             with self.subTest(variant=variant), self.assertRaises(ValueError):
@@ -132,6 +171,11 @@ class NativeGpuCommandsTests(unittest.TestCase):
         for clear in (0, 1, "false", None):
             with self.subTest(clear=clear), self.assertRaises(ValueError):
                 gpu.build_gpu_buffer(clear_only=clear)
+        for frame in (-1, 4, True, 0.0, "0"):
+            with self.subTest(frame=frame), self.assertRaises(ValueError):
+                gpu.build_gpu_buffer(animation_frame=frame)
+        with self.assertRaises(ValueError):
+            gpu.build_gpu_buffer(clear_only=True, animation_frame=0)
 
 
 # Guard every header in this small real-source compile; no source is copied into

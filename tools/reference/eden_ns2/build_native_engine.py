@@ -33,7 +33,7 @@ EDEN_REPO = "https://github.com/0x2593/Eden-NS2.git"
 CAST = "src/video_core/texture_cache/util.cpp"
 LOADER = "src/core/loader/loader.h"
 LOGGING = "src/common/logging.cpp"
-SOURCE_BLOBS = {**overlay_eden_exit.ORIGINAL_BLOBS,
+SOURCE_BLOBS = {**overlay_eden_exit.ORIGINAL_BLOBS, **overlay_eden_exit.APPLET_BLOBS,
                 CAST: "94e841e8ea4e13beb547ecc1653b5088b770a166",
                 LOADER: "d3c0230cb0637bbd227ba30b703960f0b50ecbb6",
                 LOGGING: "ed12d5253244c1cd464c0a3703e62e412aeda8b6"}
@@ -164,6 +164,9 @@ def inspect_source(root: Path, allow_original: bool = False, *,
     svc, frontend = overlay_eden_exit.patch_sources(
         *(originals[name].decode() for name in overlay_eden_exit.ORIGINAL_BLOBS))
     expected = dict(zip(overlay_eden_exit.ORIGINAL_BLOBS, (svc.encode(), frontend.encode())))
+    expected.update(zip(overlay_eden_exit.APPLET_BLOBS, (text.encode() for text in
+        overlay_eden_exit.patch_applet_sources(
+            *(originals[name].decode() for name in overlay_eden_exit.APPLET_BLOBS)))))
     cast = originals[CAST].decode()
     if revision == BASELINE_SHA:
         if cast.count(CAST_BEFORE) != 1 or "for (s32 layer = 0; layer < info.resources.layers; ++layer)" not in cast:

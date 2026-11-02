@@ -7,7 +7,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from run_native_frame import CONFIG, GPU_CONFIG, verify_shader_inputs, vulkan_environment
+from run_native_frame import (
+    ANIMATION_CONFIG, CAPTURE_SIZE, CONFIG, FLUSH_CONFIG, GPU_CONFIG, AnimationCaptures,
+    verify_shader_inputs, verify_vulkan_capabilities, vulkan_environment,
+)
 
 
 class NativeFrameEnvironmentTests(unittest.TestCase):
@@ -23,6 +26,7 @@ class NativeFrameEnvironmentTests(unittest.TestCase):
                 vertex.write_bytes(inputs[0x1000:0x2000])
                 fragment.write_bytes(inputs[0x2000:0x3000])
                 self.assertTrue(verify_shader_inputs(root, variant, False))
+                self.assertEqual(verify_shader_inputs(root, 1, False, animation=True), variant == 0)
                 self.assertFalse(verify_shader_inputs(root, 1 - variant, False))
                 self.assertFalse(verify_shader_inputs(root, variant, True))
                 fragment.write_bytes(inputs[0x2000:0x3000] + b"\0")
@@ -72,6 +76,157 @@ class NativeFrameEnvironmentTests(unittest.TestCase):
         self.assertEqual(config["Miscellaneous"]["log_filter"],
                          "*:Info HW.GPU:Debug Service.NVDRV:Debug Shader:Debug")
         self.assertTrue(GPU_CONFIG.startswith(CONFIG))
+
+    def test_animation_retirement_logging_and_durable_file_log_are_explicit(self):
+        config = configparser.ConfigParser()
+        config.read_string(ANIMATION_CONFIG + FLUSH_CONFIG)
+        self.assertIn("Service.AM:Debug", config["Miscellaneous"]["log_filter"])
+        self.assertEqual(config["Miscellaneous"]["flush_line"], "true")
+        self.assertEqual(config["Miscellaneous"]["flush_line\\default"], "false")
+
+
+class VulkanCapabilityTests(unittest.TestCase):
+    available = "llvmpipe VK_KHR_xlib_surface VK_KHR_swapchain\\n"
+
+    def test_healthy_preflight_runs_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = []
+
+            def run(command, directory, env, log_name, seconds):
+                calls.append(log_name)
+                (directory / log_name).write_text(self.available)
+                return 0, 0.01
+
+            with patch("run_native_frame.run_x11", side_effect=run):
+                verify_vulkan_capabilities(root, Path("/lvp.json"))
+            self.assertEqual(calls, ["vulkan.log"])
+            self.assertFalse((root / "vulkan-retry.log").exists())
+
+    def test_only_xcb_failure_gets_a_fresh_retry_and_preserves_both_logs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = []
+            connection_error = "XCB failed to connect to the X server due to error:1.\\n"
+
+            def run(command, directory, env, log_name, seconds):
+                calls.append(log_name)
+                (directory / log_name).write_text(
+                    connection_error if len(calls) == 1 else self.available)
+                return (1 if len(calls) == 1 else 0), 0.01
+
+            with patch("run_native_frame.run_x11", side_effect=run):
+                verify_vulkan_capabilities(root, Path("/lvp.json"))
+            self.assertEqual(calls, ["vulkan.log", "vulkan-retry.log"])
+            self.assertEqual((root / "vulkan.log").read_text(), connection_error)
+            self.assertEqual((root / "vulkan-retry.log").read_text(), self.available)
+
+    def test_nontransient_failures_never_retry_or_pass(self):
+        for rc, body in ((1, "unrelated loader failure"),
+                         (0, "llvmpipe VK_KHR_swapchain"),
+                         (1, self.available)):
+            with self.subTest(rc=rc, body=body), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                calls = []
+
+                def run(command, directory, env, log_name, seconds):
+                    calls.append(log_name)
+                    (directory / log_name).write_text(body)
+                    return rc, 0.01
+
+                with patch("run_native_frame.run_x11", side_effect=run):
+                    with self.assertRaisesRegex(ValueError, "inspect vulkan.log"):
+                        verify_vulkan_capabilities(root, Path("/lvp.json"))
+                self.assertEqual(calls, ["vulkan.log"])
+
+    def test_second_xcb_failure_is_rejected_without_unbounded_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = []
+
+            def run(command, directory, env, log_name, seconds):
+                calls.append(log_name)
+                (directory / log_name).write_text("XCB failed to connect to the X server")
+                return 1, 0.01
+
+            with patch("run_native_frame.run_x11", side_effect=run):
+                with self.assertRaisesRegex(ValueError, "inspect vulkan-retry.log"):
+                    verify_vulkan_capabilities(root, Path("/lvp.json"))
+            self.assertEqual(calls, ["vulkan.log", "vulkan-retry.log"])
+
+
+class AnimationCaptureTests(unittest.TestCase):
+    callback = ("[ 1.234] Service.NVDRV <Info> "
+                "core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:147:operator(): "
+                "Captured composited frame: 1920x1080, saved=true, nonblack=true")
+
+    def test_archives_each_completed_capture_before_rearming_and_keeps_first_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / "runtime.log"
+            log.write_bytes(b"")
+            collector = AnimationCaptures(root)
+            for frame in range(4):
+                request = root / "native-frame.request"
+                if frame:
+                    self.assertTrue(request.exists())
+                    request.unlink()  # The compositor consumes each request.
+                pixels = bytes([frame]) * CAPTURE_SIZE
+                (root / "native-latest-frame.tga").write_bytes(pixels)
+                with log.open("ab") as stream:
+                    stream.write(("\0\x1b[32m" + self.callback + "\x1b[0m\n").encode())
+                collector.poll()
+                self.assertIsNone(collector.error)
+                self.assertEqual((root / f"frame-{frame}.tga").read_bytes(), pixels)
+                self.assertEqual(len(collector.events), frame + 1)
+                self.assertEqual(request.exists(), frame < 3)
+            self.assertEqual((root / "frame-0.tga").read_bytes(), bytes(CAPTURE_SIZE))
+            collector.poll()
+            self.assertEqual(len(collector.events), 4)
+
+    def test_incomplete_or_wrongly_attributed_callback_cannot_capture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log = root / "runtime.log"
+            (root / "native-latest-frame.tga").write_bytes(bytes(CAPTURE_SIZE))
+            collector = AnimationCaptures(root)
+            log.write_text(self.callback.replace(":147:", ":148:") + "\n" + self.callback[:40])
+            collector.poll()
+            self.assertEqual(collector.events, [])
+            with log.open("a") as stream:
+                stream.write(self.callback[40:] + "\n")
+            collector.poll()
+            self.assertIsNone(collector.error)
+            self.assertEqual(len(collector.events), 1)
+
+    def test_missing_short_or_replaced_capture_preserves_failure_without_rearming(self):
+        for invalid in ("missing", "short", "preexisting"):
+            with self.subTest(invalid=invalid), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "runtime.log").write_text(self.callback + "\n")
+                if invalid != "missing":
+                    (root / "native-latest-frame.tga").write_bytes(
+                        b"short" if invalid == "short" else bytes(CAPTURE_SIZE))
+                if invalid == "preexisting":
+                    (root / "frame-0.tga").write_bytes(b"previous evidence")
+                collector = AnimationCaptures(root)
+                collector.poll()
+                self.assertIsNotNone(collector.error)
+                self.assertFalse((root / "native-frame.request").exists())
+                first_error = collector.error
+                collector.poll()
+                self.assertEqual(collector.error, first_error)
+                if invalid == "preexisting":
+                    self.assertEqual((root / "frame-0.tga").read_bytes(), b"previous evidence")
+
+    def test_duplicate_callback_is_not_treated_as_a_fresh_frame(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "runtime.log").write_text((self.callback + "\n") * 2)
+            (root / "native-latest-frame.tga").write_bytes(bytes(CAPTURE_SIZE))
+            collector = AnimationCaptures(root)
+            collector.poll()
+            self.assertIsNotNone(collector.error)  # The newly armed request was never consumed.
 
 
 if __name__ == "__main__":
