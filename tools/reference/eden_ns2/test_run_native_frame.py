@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from run_native_frame import (
     ANIMATION_CONFIG, CAPTURE_SIZE, CONFIG, FLUSH_CONFIG, GPU_CONFIG, AnimationCaptures,
-    verify_shader_inputs, vulkan_environment,
+    verify_shader_inputs, verify_vulkan_capabilities, vulkan_environment,
 )
 
 
@@ -83,6 +83,76 @@ class NativeFrameEnvironmentTests(unittest.TestCase):
         self.assertIn("Service.AM:Debug", config["Miscellaneous"]["log_filter"])
         self.assertEqual(config["Miscellaneous"]["flush_line"], "true")
         self.assertEqual(config["Miscellaneous"]["flush_line\\default"], "false")
+
+
+class VulkanCapabilityTests(unittest.TestCase):
+    available = "llvmpipe VK_KHR_xlib_surface VK_KHR_swapchain\\n"
+
+    def test_healthy_preflight_runs_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = []
+
+            def run(command, directory, env, log_name, seconds):
+                calls.append(log_name)
+                (directory / log_name).write_text(self.available)
+                return 0, 0.01
+
+            with patch("run_native_frame.run_x11", side_effect=run):
+                verify_vulkan_capabilities(root, Path("/lvp.json"))
+            self.assertEqual(calls, ["vulkan.log"])
+            self.assertFalse((root / "vulkan-retry.log").exists())
+
+    def test_only_xcb_failure_gets_a_fresh_retry_and_preserves_both_logs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = []
+            connection_error = "XCB failed to connect to the X server due to error:1.\\n"
+
+            def run(command, directory, env, log_name, seconds):
+                calls.append(log_name)
+                (directory / log_name).write_text(
+                    connection_error if len(calls) == 1 else self.available)
+                return (1 if len(calls) == 1 else 0), 0.01
+
+            with patch("run_native_frame.run_x11", side_effect=run):
+                verify_vulkan_capabilities(root, Path("/lvp.json"))
+            self.assertEqual(calls, ["vulkan.log", "vulkan-retry.log"])
+            self.assertEqual((root / "vulkan.log").read_text(), connection_error)
+            self.assertEqual((root / "vulkan-retry.log").read_text(), self.available)
+
+    def test_nontransient_failures_never_retry_or_pass(self):
+        for rc, body in ((1, "unrelated loader failure"),
+                         (0, "llvmpipe VK_KHR_swapchain"),
+                         (1, self.available)):
+            with self.subTest(rc=rc, body=body), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                calls = []
+
+                def run(command, directory, env, log_name, seconds):
+                    calls.append(log_name)
+                    (directory / log_name).write_text(body)
+                    return rc, 0.01
+
+                with patch("run_native_frame.run_x11", side_effect=run):
+                    with self.assertRaisesRegex(ValueError, "inspect vulkan.log"):
+                        verify_vulkan_capabilities(root, Path("/lvp.json"))
+                self.assertEqual(calls, ["vulkan.log"])
+
+    def test_second_xcb_failure_is_rejected_without_unbounded_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            calls = []
+
+            def run(command, directory, env, log_name, seconds):
+                calls.append(log_name)
+                (directory / log_name).write_text("XCB failed to connect to the X server")
+                return 1, 0.01
+
+            with patch("run_native_frame.run_x11", side_effect=run):
+                with self.assertRaisesRegex(ValueError, "inspect vulkan-retry.log"):
+                    verify_vulkan_capabilities(root, Path("/lvp.json"))
+            self.assertEqual(calls, ["vulkan.log", "vulkan-retry.log"])
 
 
 class AnimationCaptureTests(unittest.TestCase):
