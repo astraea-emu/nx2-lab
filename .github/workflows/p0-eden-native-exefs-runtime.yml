@@ -403,7 +403,7 @@ jobs:
             ${{ runner.temp }}/native-engine.json
             ${{ runner.temp }}/native-frame/**/run-summary.json
             ${{ runner.temp }}/native-frame/**/provenance.json
-            ${{ runner.temp }}/native-frame/**/vulkan.log
+            ${{ runner.temp }}/native-frame/**/vulkan*.log
             ${{ runner.temp }}/native-frame/**/*.xvfb
             ${{ runner.temp }}/native-frame/**/fixture.log
             ${{ runner.temp }}/native-frame/**/runtime.log
