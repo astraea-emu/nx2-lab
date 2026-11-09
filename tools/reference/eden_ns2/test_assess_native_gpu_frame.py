@@ -536,6 +536,35 @@ class AnimationTests(unittest.TestCase):
         bad[-1] ^= 1
         self.assertFalse(self.check(captures=(*self.captures[:2], bytes(bad), self.captures[3])))
 
+    def test_render_evidence_cannot_override_a_failed_process_exit(self):
+        bad = bytearray(self.captures[2])
+        bad[-1] ^= 1
+        corrupted = (*self.captures[:2], bytes(bad), self.captures[3])
+        for rc, captures, evidence_ok, accepted in (
+                (0, self.captures, True, True),
+                (124, self.captures, True, False),
+                (137, self.captures, True, False),
+                (137, corrupted, False, False)):
+            with self.subTest(rc=rc, evidence_ok=evidence_ok):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result = gpu.assess_animation(self.log, rc, captures, 0,
+                                                   eden_revision=gpu.BASELINE_SHA)
+                self.assertIs(result, accepted)
+                self.assertIn(f"NX2_NATIVE_GPU_ANIMATION_RENDER_EVIDENCE_OK={int(evidence_ok)}",
+                              output.getvalue())
+                final = ("NX2_NATIVE_GPU_ANIMATION_PASS" if accepted else
+                         "NX2_NATIVE_GPU_ANIMATION_NOT_VERIFIED")
+                self.assertIn(final, output.getvalue())
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            accepted = gpu.assess_animation(self.log + b"Assertion Failed\n", 137,
+                                             self.captures, 0,
+                                             eden_revision=gpu.BASELINE_SHA)
+        self.assertFalse(accepted)
+        self.assertIn("NX2_NATIVE_GPU_ANIMATION_RENDER_EVIDENCE_OK=0", output.getvalue())
+
     def test_source_attributed_events_are_required_and_unique(self):
         fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:114:Composite: "
                  b"Native composite waits for syncpoint=5/2, current=2\n")
