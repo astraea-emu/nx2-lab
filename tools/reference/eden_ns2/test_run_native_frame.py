@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from run_native_frame import (
     ANIMATION_CONFIG, CAPTURE_SIZE, CONFIG, FLUSH_CONFIG, GPU_CONFIG, AnimationCaptures,
-    verify_shader_inputs, verify_vulkan_capabilities, vulkan_environment,
+    assessment_flag, verify_shader_inputs, verify_vulkan_capabilities, vulkan_environment,
 )
 
 
@@ -153,6 +153,26 @@ class VulkanCapabilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "inspect vulkan-retry.log"):
                     verify_vulkan_capabilities(root, Path("/lvp.json"))
             self.assertEqual(calls, ["vulkan.log", "vulkan-retry.log"])
+
+
+class AssessmentFlagTests(unittest.TestCase):
+    def test_exact_tristate_render_and_cleanup_evidence(self):
+        report = ("NX2_NATIVE_GPU_ANIMATION_CLEANUP_OBSERVED=1\n"
+                  "NX2_NATIVE_GPU_ANIMATION_RENDER_EVIDENCE_OK=0\n"
+                  "NX2_NATIVE_GPU_ANIMATION_NOT_VERIFIED\n")
+        self.assertIs(assessment_flag(report, "CLEANUP_OBSERVED"), True)
+        self.assertIs(assessment_flag(report, "RENDER_EVIDENCE_OK"), False)
+        self.assertIsNone(assessment_flag(report, "FRAME_0_FIELDS_MATCH"))
+
+    def test_missing_malformed_or_duplicate_diagnostics_are_unknown(self):
+        prefix = "NX2_NATIVE_GPU_ANIMATION_RENDER_EVIDENCE_OK="
+        for report in ("", prefix + "2\n", prefix + "true\n",
+                       prefix + "1 extra\n", prefix + "1\n" + prefix + "0\n"):
+            with self.subTest(report=report):
+                self.assertIsNone(assessment_flag(report, "RENDER_EVIDENCE_OK"))
+        self.assertIsNone(assessment_flag("prefix " + prefix + "1\n",
+                                          "RENDER_EVIDENCE_OK"))
+        self.assertIs(assessment_flag(prefix + "1\n", "RENDER_EVIDENCE_OK"), True)
 
 
 class AnimationCaptureTests(unittest.TestCase):
