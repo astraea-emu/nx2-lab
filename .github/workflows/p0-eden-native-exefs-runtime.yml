@@ -281,37 +281,145 @@ jobs:
               raise SystemExit('Engine reuse or repeated GPU verification failed')
           print('NX2_GPU_ENGINE_REUSE_AND_REPEAT_PASS')
           PY
-      - name: Preserve independent original runtime logs
+      - name: Repeat four-frame animation and an edited vertex sequence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/reference/eden_ns2/run_native_frame.py \
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-animation" --gpu-animation --both \
+            | tee "$RUNNER_TEMP/native-animation-first.log"
+          python3 tools/reference/eden_ns2/run_native_frame.py \
+            --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+            --output "$RUNNER_TEMP/native-animation" --gpu-animation --both \
+            | tee "$RUNNER_TEMP/native-animation-repeat.log"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'native-animation'
+          paths = sorted(root.glob('run-*/run-summary.json'))
+          if len(paths) != 2:
+              raise SystemExit('Expected exactly two fresh animation invocations')
+          first, repeat = [json.loads(p.read_text()) for p in paths]
+          if not (first['verified'] and repeat['verified'] and
+                  first['engine_reused'] and repeat['engine_reused'] and
+                  first['eden_revision'] == repeat['eden_revision'] == os.environ['EDEN_REVISION'] and
+                  first['output_directory'] != repeat['output_directory'] and
+                  first['eden_cli_sha256'] == repeat['eden_cli_sha256'] and
+                  first['variants'] == repeat['variants'] and len(first['variants']) == 2 and
+                  all(len(v['frame_sha256']) == len(set(v['frame_sha256'])) == 4 and
+                      all(v['frame_sha256']) for v in first['variants'])):
+              raise SystemExit('Engine reuse or repeated animation verification failed')
+          print('NX2_ANIMATION_ENGINE_REUSE_AND_REPEAT_PASS')
+          PY
+      - name: Stress selected animation with fresh execution and natural exits
+        if: matrix.engine == 'candidate'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            log="$RUNNER_TEMP/native-animation-stress-${attempt}.log"
+            if ! python3 tools/reference/eden_ns2/run_native_frame.py \
+                --eden-revision "$EDEN_REVISION" --engine-dir "$RUNNER_TEMP" \
+                --output "$RUNNER_TEMP/native-animation-stress" --gpu-animation --both \
+                >"$log" 2>&1; then
+              python3 - "$log" "$RUNNER_TEMP/native-animation-stress-failure.json" "$attempt" <<'PY'
+          import json, sys
+          from pathlib import Path
+          log, destination, attempt = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+          results = []
+          for line in log.read_text(errors="replace").splitlines():
+              for prefix in ("NX2_FRAME_TRIAL ", "NX2_FRAME_RUN "):
+                  if line.startswith(prefix):
+                      try:
+                          item = json.loads(line[len(prefix):])
+                      except ValueError:
+                          continue
+                      if prefix == "NX2_FRAME_TRIAL ":
+                          files = item.get("files") or {}
+                          results.append({"variant": item.get("variant"),
+                                          "rc": item.get("process_rc"),
+                                          "verified": item.get("verified"),
+                                          "runtime_seconds": item.get("runtime_seconds"),
+                                          "render_evidence_ok": item.get("render_evidence_ok"),
+                                          "cleanup_observed": item.get("cleanup_observed"),
+                                          "archived_frames": item.get("archived_frames"),
+                                          "failed_checks": item.get("failed_checks"),
+                                          "protocol_error_count": item.get("protocol_error_count"),
+                                          "protocol_error_kinds": item.get("protocol_error_kinds"),
+                                          "unexpected_error_phases": item.get("unexpected_error_phases"),
+                                          "request_consumed": item.get("request_consumed"),
+                                          "main_sha256": files.get("main"),
+                                          "frame_sha256": [files.get(f"frame-{i}.tga")
+                                                           for i in range(4)]})
+                      else:
+                          results.append({"invocation_verified": item.get("verified", False)})
+          receipt = {"attempt": attempt, "trials": results, "no_trial_result": not results}
+          destination.write_text(json.dumps(receipt, indent=2) + "\n")
+          print("NX2_ANIMATION_STRESS_FAILURE_RECEIPT " + json.dumps(receipt, sort_keys=True))
+          PY
+              echo "NX2_ANIMATION_STRESS_FAILED attempt=$attempt; trial not accepted"
+              exit 1
+            fi
+            echo "NX2_ANIMATION_STRESS_COMPLETED attempt=$attempt"
+          done
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'native-animation-stress'
+          paths = sorted(root.glob('run-*/run-summary.json'))
+          if len(paths) != 20:
+              raise SystemExit('Expected exactly 20 independent animation invocations')
+          expected = None
+          identities = set()
+          for path in paths:
+              summary = json.loads(path.read_text())
+              if (not summary['verified'] or not summary['engine_reused'] or
+                  summary['eden_revision'] != os.environ['EDEN_REVISION'] or
+                  len(summary['variants']) != 2 or
+                  summary['output_directory'] != str(path.parent)):
+                  raise SystemExit('Unverified invocation, engine reuse or provenance')
+              identities.add(summary['output_directory'])
+              signature = (
+                  summary['eden_cli_sha256'],
+                  tuple((v['variant'], v['main_sha256'], v['npdm_sha256'],
+                         tuple(v['frame_sha256'])) for v in summary['variants']))
+              if any(v['process_rc'] != 0 or len(v['frame_sha256']) != 4 or
+                     len(set(v['frame_sha256'])) != 4 or
+                     not all(v['frame_sha256']) for v in summary['variants']):
+                  raise SystemExit('Unexpected shutdown, missing capture or stale frames')
+              if expected is None:
+                  expected = signature
+              elif signature != expected:
+                  raise SystemExit('Input, capture, or executable changed across stress runs')
+          if len(identities) != 20:
+              raise SystemExit('Reused or repeated output directory')
+          print('NX2_ANIMATION_SELECTED_STRESS_20_PASS')
+          PY
+      - name: Preserve only original evidence, not raw host logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: original-native-exefs-logs-${{ matrix.engine }}
+          name: original-native-exefs-evidence-${{ matrix.engine }}
           retention-days: 3
           if-no-files-found: ignore
           path: |
-            ${{ runner.temp }}/native-valid.log
-            ${{ runner.temp }}/native-invalid.log
-            ${{ runner.temp }}/native-ipc.log
-            ${{ runner.temp }}/native-vi2.log
-            ${{ runner.temp }}/native-vi2-assessment.log
-            ${{ runner.temp }}/native-vi2-fixture.log
-            ${{ runner.temp }}/native-frame-first.log
-            ${{ runner.temp }}/native-frame-repeat.log
-            ${{ runner.temp }}/native-engine.json
+            ${{ runner.temp }}/native-animation-stress-failure.json
             ${{ runner.temp }}/native-frame/**/run-summary.json
             ${{ runner.temp }}/native-frame/**/provenance.json
-            ${{ runner.temp }}/native-frame/**/vulkan.log
-            ${{ runner.temp }}/native-frame/**/*.xvfb
-            ${{ runner.temp }}/native-frame/**/fixture.log
-            ${{ runner.temp }}/native-frame/**/runtime.log
-            ${{ runner.temp }}/native-frame/**/assessment.log
-            ${{ runner.temp }}/native-frame/**/result.json
-            ${{ runner.temp }}/native-frame/**/config.ini
+            ${{ runner.temp }}/native-frame/**/guest/main
+            ${{ runner.temp }}/native-frame/**/guest/main.npdm
             ${{ runner.temp }}/native-frame/**/native-latest-frame.tga
-            ${{ runner.temp }}/native-frame/**/guest/main*
-            ${{ runner.temp }}/native-gpu-first.log
-            ${{ runner.temp }}/native-gpu-repeat.log
-            ${{ runner.temp }}/native-gpu/
+            ${{ runner.temp }}/native-gpu/**/run-summary.json
+            ${{ runner.temp }}/native-gpu/**/provenance.json
+            ${{ runner.temp }}/native-gpu/**/guest/main
+            ${{ runner.temp }}/native-gpu/**/guest/main.npdm
+            ${{ runner.temp }}/native-gpu/**/native-latest-frame.tga
+            ${{ runner.temp }}/native-animation/**/run-summary.json
+            ${{ runner.temp }}/native-animation/**/provenance.json
+            ${{ runner.temp }}/native-animation/**/guest/main
+            ${{ runner.temp }}/native-animation/**/guest/main.npdm
+            ${{ runner.temp }}/native-animation/**/frame-?.tga
 
   compare:
     name: identical original inputs and pixels
@@ -321,7 +429,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: original-native-exefs-logs-*
+          pattern: original-native-exefs-evidence-*
           path: ${{ runner.temp }}/comparison
       - name: Compare both revisions and every repeated capture
         shell: bash
@@ -335,10 +443,13 @@ jobs:
           revisions = {'baseline': 'e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c',
                        'candidate': 'b2cef0c0f2e8517673233e22c929918e2c60e654'}
           for engine, revision in revisions.items():
-              root = roots / ('original-native-exefs-logs-' + engine)
+              root = roots / ('original-native-exefs-evidence-' + engine)
+              if any(path.is_file() and path.suffix == '.log' for path in root.rglob('*')):
+                  raise SystemExit(f'{engine}: raw host log present in evidence artifact')
               observed[engine] = {}
               for family, variants in (('native-frame', ('variant-0', 'variant-1')),
-                                       ('native-gpu', ('variant-0', 'variant-1', 'clear-only'))):
+                                       ('native-gpu', ('variant-0', 'variant-1', 'clear-only')),
+                                       ('native-animation', ('variant-0', 'variant-1'))):
                   runs = sorted((root / family).glob('run-*'))
                   if len(runs) != 2:
                       raise SystemExit(f'{engine}/{family}: expected two independent runs')
@@ -350,13 +461,15 @@ jobs:
                               provenance['engine']['eden_revision'] == revision):
                           raise SystemExit(f'{engine}/{family}: incorrect engine or failed run')
                       for variant in variants:
-                          for file in ('guest/main', 'guest/main.npdm', 'native-latest-frame.tga'):
+                          captures = (tuple(f'frame-{i}.tga' for i in range(4))
+                                      if family == 'native-animation' else ('native-latest-frame.tga',))
+                          for file in ('guest/main', 'guest/main.npdm', *captures):
                               key = f'{family}/{variant}/{file}'
                               sha = hashlib.sha256((run / variant / file).read_bytes()).hexdigest()
                               previous = observed[engine].setdefault(key, sha)
                               if sha != previous:
                                   raise SystemExit(f'{engine}/{key}: repeat differs')
-              if len(observed[engine]) != 15:
+              if len(observed[engine]) != 27:
                   raise SystemExit('Incomplete original workload comparison')
           if observed['baseline'] != observed['candidate']:
               raise SystemExit('The revisions used different original inputs or produced different pixels')

@@ -10,6 +10,12 @@
 .ifndef NX2_GPU_PROBE
     .set NX2_GPU_PROBE, 0
 .endif
+.ifndef NX2_GPU_ANIMATION
+    .set NX2_GPU_ANIMATION, 0
+.endif
+.if NX2_GPU_ANIMATION && !NX2_GPU_PROBE
+    .error "animation requires the GPU guest"
+.endif
 .if (NX2_FRAME_VARIANT != 0) && (NX2_FRAME_VARIANT != 1)
     .error "NX2_FRAME_VARIANT must be 0 or 1"
 .endif
@@ -137,10 +143,25 @@ field_names:
     field close_applet
     field close_sm
     field fail_step
+.if NX2_GPU_ANIMATION
+    field animation_frame
+    field animation_slot
+    field second_memory_id
+    field second_image_id
+    tipc_fields second_memory_create
+    tipc_fields second_memory_bind
+    tipc_fields second_image_create
+    tipc_fields second_pool_create
+    tipc_fields second_pool_destroy
+    tipc_fields second_image_destroy
+    tipc_fields second_memory_destroy
+    field animation_target_address_lo
+    field animation_target_address_hi
+.endif
     .byte 0
 .global FIELD_COUNT
 .equ FIELD_COUNT, FIELD_OFFSET / 4
-.if FIELD_COUNT != 281
+.if FIELD_COUNT != (281 + 34 * NX2_GPU_ANIMATION)
     .error "frame report contract must have 281 fields"
 .endif
 .section .text, "ax"
@@ -489,6 +510,43 @@ _start:
     send 5, pool_create
     tipc_check pool_create, 315
     orr x20, x20, #(1 << 3)
+.if NX2_GPU_ANIMATION
+    step 49
+    prepare memory_create_request
+    send 5, second_memory_create
+    ldr w4, [x21, #12]
+    str w4, [x22, #F_second_memory_id]
+    tipc_check second_memory_create, 111, 0, 2
+    take_id second_memory_id, 7
+    ldr w1, [x22, #F_memory_id]
+    cmp w0, w1
+    b.eq failure
+    step 50
+    prepare memory_bind_request
+    patch_id second_memory_id
+    address x0, image_buffer
+    add x0, x0, #8192
+    str x0, [x21, #12]
+    send 5, second_memory_bind
+    tipc_check second_memory_bind, 114
+    step 51
+    prepare image_create_request
+    patch_id second_memory_id, 76
+    send 5, second_image_create
+    ldr w4, [x21, #12]
+    str w4, [x22, #F_second_image_id]
+    tipc_check second_image_create, 429, 0, 2
+    take_id second_image_id, 8
+    ldr w1, [x22, #F_image_id]
+    cmp w0, w1
+    b.eq failure
+    step 52
+    prepare pool_create_request
+    patch_id second_image_id
+    send 5, second_pool_create
+    tipc_check second_pool_create, 315
+    orr x20, x20, #(1 << 9)
+.endif
     step 24
     tipc_call display_init_request, 5, display_init, 301
     orr x20, x20, #1
@@ -503,6 +561,14 @@ _start:
     step 28
     tipc_call bind_display_request, 7, bind_display, 251
     orr x20, x20, #(1 << 6)
+.if NX2_GPU_ANIMATION
+    str wzr, [x22, #F_animation_frame]
+.Lanimation_frame:
+    ldr w0, [x22, #F_animation_frame]
+    and w0, w0, #1
+    str w0, [x22, #F_animation_slot]
+    emit animation_begin
+.endif
     step 29
     prepare availability_request
     send 7, available_before
@@ -510,11 +576,21 @@ _start:
     tipc_check available_before, 212, 0, 3
     check_u64 available_before, 0x7fff
 .if NX2_GPU_PROBE
+.if NX2_GPU_ANIMATION
+    bl gpu_prepare_animation_frame
+.endif
     bl gpu_submit_and_wait
 .endif
     step 30
     prepare present_request
     patch_id image_id, 20
+.if NX2_GPU_ANIMATION
+    ldr w0, [x22, #F_animation_slot]
+    str w0, [x21, #16]
+    cbz w0, 1f
+    patch_id second_image_id, 20
+1:
+.endif
 .if NX2_GPU_PROBE
     bl gpu_patch_present
 .endif
@@ -528,7 +604,19 @@ _start:
     str w4, [x22, #F_present_tail02]
     str w5, [x22, #F_present_tail03]
     tipc_check present, 229, 0, 7
+.if NX2_GPU_ANIMATION
+    add x9, x22, #F_present_lo
+    ldr x0, [x9]
+    ldr w2, [x22, #F_animation_slot]
+    mov x1, #1
+    lsl x1, x1, x2
+    mov x2, #0x7fff
+    eor x1, x1, x2
+    cmp x0, x1
+    b.ne failure
+.else
     check_u64 present, 0x7ffe
+.endif
     add x9, x22, #F_present_tail00
     ldp x0, x1, [x9]
     orr x0, x0, x1
@@ -543,7 +631,15 @@ _start:
     str wzr, [x22, #F_poll_count]
     str wzr, [x22, #F_poll_queued_count]
     str wzr, [x22, #F_poll_released_count]
+.if NX2_GPU_ANIMATION
+    /* Give the host time to archive the actual saved capture and rearm it.
+     * Acceptance requires that callback before the next FRAME_BEGIN; elapsed
+     * time and availability alone never prove rendered completion.
+     */
+    mov w23, #20
+.else
     mov w23, #100
+.endif
 .Lhold:
     prepare availability_request
     send 7, poll
@@ -551,10 +647,22 @@ _start:
     tipc_check poll, 212, 0, 3
     add x9, x22, #F_poll_lo
     ldr x0, [x9]
+.if NX2_GPU_ANIMATION
+    ldr w2, [x22, #F_animation_slot]
+    mov x1, #1
+    lsl x1, x1, x2
+    mov x2, #0x7fff
+    eor x1, x1, x2
+.else
     mov x1, #0x7ffe
+.endif
     cmp x0, x1
     b.eq .Lqueued
+.if NX2_GPU_ANIMATION
+    mov x1, #0x7fff
+.else
     add x1, x1, #1
+.endif
     cmp x0, x1
     b.ne failure
     ldr w0, [x22, #F_poll_released_count]
@@ -580,6 +688,16 @@ _start:
     step 33
     notification_call clear, 128, 0, 0, 0
     str wzr, [x22, #F_fail_step]
+.if NX2_GPU_ANIMATION
+    bl report
+    emit animation_end
+    ldr w0, [x22, #F_animation_frame]
+    cmp w0, #3
+    b.eq cleanup
+    add w0, w0, #1
+    str w0, [x22, #F_animation_frame]
+    b .Lanimation_frame
+.endif
     b cleanup
 
 /* CPU-produced pattern: 2x2 checker, with four asymmetric 2x2 corners.
@@ -703,6 +821,11 @@ cleanup:
     release unbind_display_request, 7, unbind_display, 252, 6, 34
     release unregister_request, 7, unregister, 202, 4, 35
     release close_display_request, 7, close_display, 102, 5, 36
+.if NX2_GPU_ANIMATION
+    release pool_destroy_request, 5, second_pool_destroy, 314, 9, 53, second_image_id
+    release image_destroy_request, 5, second_image_destroy, 430, 8, 54, second_image_id
+    release memory_destroy_request, 5, second_memory_destroy, 112, 7, 55, second_memory_id
+.endif
     release pool_destroy_request, 5, pool_destroy, 314, 3, 37, image_id
     release image_destroy_request, 5, image_destroy, 430, 2, 38, image_id
     release memory_destroy_request, 5, memory_destroy, 112, 1, 39, memory_id
@@ -723,7 +846,17 @@ cleanup:
     add w25, w25, #1
     subs x23, x23, #1
     b.ge 1b
+.if NX2_GPU_ANIMATION
+    bl report
+    b final_status
+.endif
 report:
+.if NX2_GPU_ANIMATION
+    stp x29, x30, [sp, #-64]!
+    stp x23, x24, [sp, #16]
+    stp x25, x26, [sp, #32]
+    stp x27, x28, [sp, #48]
+.endif
     address x23, field_names
     mov x24, #0
     address x25, line_buffer
@@ -781,6 +914,14 @@ report:
 report_end:
 .if NX2_GPU_PROBE
     bl gpu_report
+.endif
+.if NX2_GPU_ANIMATION
+    ldp x23, x24, [sp, #16]
+    ldp x25, x26, [sp, #32]
+    ldp x27, x28, [sp, #48]
+    ldp x29, x30, [sp], #64
+    ret
+final_status:
 .endif
     ldr w0, [x22, #F_fail_step]
     cbnz w0, 1f
@@ -982,6 +1123,14 @@ complete_message_end:
 failure_message:
     .ascii "NX2_FRAME_FAILURE\n"
 failure_message_end:
+.if NX2_GPU_ANIMATION
+animation_begin_message:
+    .ascii "NX2_ANIMATION_FRAME_BEGIN\n"
+animation_begin_message_end:
+animation_end_message:
+    .ascii "NX2_ANIMATION_FRAME_END\n"
+animation_end_message_end:
+.endif
 .section .data, "aw"
 .balign 16
 .global record, live_handles, notification_buffer, notification_guard_before
@@ -1005,4 +1154,7 @@ line_buffer:
 .balign 4096
 image_buffer:
     .zero 8192
+.if NX2_GPU_ANIMATION
+    .zero 8192
+.endif
 .section .note.GNU-stack, "", @progbits

@@ -15,7 +15,7 @@ SECTIONS {
     /DISCARD/ : { *(.note*) *(.comment*) }
     ASSERT(SIZEOF(.text) <= 0x4000, "GPU guest text exceeds four pages")
     ASSERT(SIZEOF(.rodata) <= 0xc000, "GPU guest constants exceed twelve pages")
-    ASSERT(SIZEOF(.data) <= 0x8000, "GPU guest data exceeds eight pages")
+    ASSERT(SIZEOF(.data) <= (NX2_GPU_ANIMATION ? 0xa000 : 0x8000), "GPU guest data exceeds its bounded allocation")
     ASSERT(image_buffer == 0x11000, "GPU image must retain separate aligned pages")
     ASSERT((gpu_buffer & 0xfff) == 0, "GPU command and shader memory must be aligned")
 }
