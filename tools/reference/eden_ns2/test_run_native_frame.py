@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 from run_native_frame import (
     ANIMATION_CONFIG, CAPTURE_SIZE, CONFIG, FLUSH_CONFIG, GPU_CONFIG, AnimationCaptures,
-    assessment_flag, failed_animation_checks, verify_shader_inputs, verify_vulkan_capabilities,
+    animation_protocol_error_kinds, assessment_flag, failed_animation_checks,
+    verify_shader_inputs, verify_vulkan_capabilities,
     vulkan_environment,
 )
 
@@ -189,6 +190,22 @@ class AssessmentFlagTests(unittest.TestCase):
         duplicate = report + "NX2_NATIVE_GPU_ANIMATION_EVENT_COUNTS_MATCH=1\n"
         self.assertEqual(failed_animation_checks(duplicate),
                          ["FRAME_0_ORDER_MATCH", "LIFETIME_ORDER"])
+
+
+    def test_protocol_kinds_preserve_reason_without_leaking_raw_log_lines(self):
+        prefix = "NX2_NATIVE_GPU_ANIMATION_PROTOCOL_ERROR="
+        report = (prefix + "unexpected error at line 250\n" +
+                  prefix + "malformed or unattributed pushbuffer at line 251\n" +
+                  prefix + "private hostname and diagnostic bytes\n" +
+                  "other prefix unexpected error at line 9\n")
+        kinds = animation_protocol_error_kinds(report)
+        self.assertEqual(kinds, ["unexpected_runtime_error", "malformed_source_event",
+                                 "unclassified"])
+        self.assertNotIn("private", repr(kinds))
+        self.assertNotIn("pushbuffer", repr(kinds))
+        self.assertEqual(animation_protocol_error_kinds(""), [])
+        self.assertEqual(len(animation_protocol_error_kinds(
+            (prefix + "unexpected stub at line 1\n") * 12)), 10)
 
 
 class AnimationCaptureTests(unittest.TestCase):

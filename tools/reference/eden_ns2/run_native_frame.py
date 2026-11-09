@@ -201,6 +201,36 @@ def failed_animation_checks(report: str) -> list[str]:
             if assessment_flag(report, name) is False]
 
 
+_ANIMATION_PROTOCOL_KINDS = (
+    ("invalid bounded animation input", "invalid_input"),
+    ("corruption, failure or substituted execution at line ", "failure_marker"),
+    ("unattributed classification at line ", "unattributed_classification"),
+    ("unattributed exit at line ", "unattributed_exit"),
+    ("invalid renderer report at line ", "invalid_renderer"),
+    ("malformed or unattributed ", "malformed_source_event"),
+    ("unattributed guest record at line ", "unattributed_guest_record"),
+    ("unknown or failed guest record at line ", "unknown_guest_record"),
+    ("incomplete, duplicated or reordered animation evidence", "incomplete_evidence"),
+    ("unexpected error at line ", "unexpected_runtime_error"),
+    ("unexpected stub at line ", "unexpected_stub"),
+)
+
+
+def animation_protocol_error_kinds(report: str) -> list[str]:
+    """Classify at most ten assessor errors without retaining raw diagnostics."""
+    prefix = "NX2_NATIVE_GPU_ANIMATION_PROTOCOL_ERROR="
+    kinds = []
+    for line in report.splitlines():
+        if line.startswith(prefix):
+            detail = line[len(prefix):]
+            kinds.append(next((kind for marker, kind in _ANIMATION_PROTOCOL_KINDS
+                               if detail == marker or detail.startswith(marker)),
+                              "unclassified"))
+            if len(kinds) == 10:
+                break
+    return kinds
+
+
 def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
           gpu: bool = False, clear_only: bool = False, animation: bool = False,
           eden_revision: str = EDEN_SHA) -> dict:
@@ -293,7 +323,8 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
                       failed_checks=failed_animation_checks(assessment),
                       protocol_error_count=sum(
                           line.startswith("NX2_NATIVE_GPU_ANIMATION_PROTOCOL_ERROR=")
-                          for line in assessment.splitlines()))
+                          for line in assessment.splitlines()),
+                      protocol_error_kinds=animation_protocol_error_kinds(assessment))
     (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print("NX2_FRAME_TRIAL " + json.dumps(result, sort_keys=True), flush=True)
     return result
