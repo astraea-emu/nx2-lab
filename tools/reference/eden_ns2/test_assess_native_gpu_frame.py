@@ -567,7 +567,7 @@ class AnimationTests(unittest.TestCase):
 
 
     def test_unexpected_runtime_error_phases_are_bounded_and_fail_closed(self):
-        redacted = b"[ 9.999] Test.Engine <Error> private runtime diagnostic\\n"
+        redacted = b"[ 9.999] Test.Engine <Error> private runtime diagnostic\n"
         cases = (
             ("before_guest", redacted + self.log),
             ("during_guest", self.log.replace(animation_marker("BEGIN"),

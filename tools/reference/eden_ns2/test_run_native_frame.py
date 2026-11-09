@@ -211,14 +211,14 @@ class AssessmentFlagTests(unittest.TestCase):
 
     def test_error_phases_are_allowlisted_and_never_include_raw_content(self):
         prefix = "NX2_NATIVE_GPU_ANIMATION_UNEXPECTED_ERROR_PHASE="
-        report = (prefix + "after_guest_exit\\n" +
-                  prefix + "sensitive-message-or-path\\n" +
-                  "unexpected prefix after_guest_exit\\n")
+        report = (prefix + "after_guest_exit\n" +
+                  prefix + "sensitive-message-or-path\n" +
+                  "unexpected prefix after_guest_exit\n")
         self.assertEqual(animation_unexpected_error_phases(report),
                          ["after_guest_exit", "unclassified"])
         self.assertEqual(animation_unexpected_error_phases(""), [])
         self.assertEqual(len(animation_unexpected_error_phases(
-            (prefix + "during_guest\\n") * 14)), 10)
+            (prefix + "during_guest\n") * 14)), 10)
 
 
 class AnimationCaptureTests(unittest.TestCase):
