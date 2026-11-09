@@ -396,42 +396,30 @@ jobs:
               raise SystemExit('Reused or repeated output directory')
           print('NX2_ANIMATION_SELECTED_STRESS_20_PASS')
           PY
-      - name: Preserve independent original runtime logs
+      - name: Preserve only original evidence, not raw host logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: original-native-exefs-logs-${{ matrix.engine }}
+          name: original-native-exefs-evidence-${{ matrix.engine }}
           retention-days: 3
           if-no-files-found: ignore
           path: |
-            ${{ runner.temp }}/native-valid.log
-            ${{ runner.temp }}/native-invalid.log
-            ${{ runner.temp }}/native-ipc.log
-            ${{ runner.temp }}/native-vi2.log
-            ${{ runner.temp }}/native-vi2-assessment.log
-            ${{ runner.temp }}/native-vi2-fixture.log
-            ${{ runner.temp }}/native-frame-first.log
-            ${{ runner.temp }}/native-frame-repeat.log
-            ${{ runner.temp }}/native-engine.json
+            ${{ runner.temp }}/native-animation-stress-failure.json
             ${{ runner.temp }}/native-frame/**/run-summary.json
             ${{ runner.temp }}/native-frame/**/provenance.json
-            ${{ runner.temp }}/native-frame/**/vulkan*.log
-            ${{ runner.temp }}/native-frame/**/*.xvfb
-            ${{ runner.temp }}/native-frame/**/fixture.log
-            ${{ runner.temp }}/native-frame/**/runtime.log
-            ${{ runner.temp }}/native-frame/**/engine.log
-            ${{ runner.temp }}/native-frame/**/assessment.log
-            ${{ runner.temp }}/native-frame/**/result.json
-            ${{ runner.temp }}/native-frame/**/config.ini
+            ${{ runner.temp }}/native-frame/**/guest/main
+            ${{ runner.temp }}/native-frame/**/guest/main.npdm
             ${{ runner.temp }}/native-frame/**/native-latest-frame.tga
-            ${{ runner.temp }}/native-frame/**/guest/main*
-            ${{ runner.temp }}/native-gpu-first.log
-            ${{ runner.temp }}/native-gpu-repeat.log
-            ${{ runner.temp }}/native-gpu/
-            ${{ runner.temp }}/native-animation-stress-failure.json
-            ${{ runner.temp }}/native-animation-first.log
-            ${{ runner.temp }}/native-animation-repeat.log
-            ${{ runner.temp }}/native-animation/
+            ${{ runner.temp }}/native-gpu/**/run-summary.json
+            ${{ runner.temp }}/native-gpu/**/provenance.json
+            ${{ runner.temp }}/native-gpu/**/guest/main
+            ${{ runner.temp }}/native-gpu/**/guest/main.npdm
+            ${{ runner.temp }}/native-gpu/**/native-latest-frame.tga
+            ${{ runner.temp }}/native-animation/**/run-summary.json
+            ${{ runner.temp }}/native-animation/**/provenance.json
+            ${{ runner.temp }}/native-animation/**/guest/main
+            ${{ runner.temp }}/native-animation/**/guest/main.npdm
+            ${{ runner.temp }}/native-animation/**/frame-?.tga
 
   compare:
     name: identical original inputs and pixels
@@ -441,7 +429,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: original-native-exefs-logs-*
+          pattern: original-native-exefs-evidence-*
           path: ${{ runner.temp }}/comparison
       - name: Compare both revisions and every repeated capture
         shell: bash
@@ -455,8 +443,10 @@ jobs:
           revisions = {'baseline': 'e2f285ab1ecd3a2475c2ccad66f23b06b94ead5c',
                        'candidate': 'b2cef0c0f2e8517673233e22c929918e2c60e654'}
           for engine, revision in revisions.items():
-              root = roots / ('original-native-exefs-logs-' + engine)
-              observed[engine] = {}
+              root = roots / ('original-native-exefs-evidence-' + engine)
+              if any(path.is_file() and path.suffix == '.log' for path in root.rglob('*')):
+              raise SystemExit(f'{engine}: raw host log present in evidence artifact')
+          observed[engine] = {}
               for family, variants in (('native-frame', ('variant-0', 'variant-1')),
                                        ('native-gpu', ('variant-0', 'variant-1', 'clear-only')),
                                        ('native-animation', ('variant-0', 'variant-1'))):
