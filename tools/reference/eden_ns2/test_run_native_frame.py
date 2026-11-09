@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 from run_native_frame import (
     ANIMATION_CONFIG, CAPTURE_SIZE, CONFIG, FLUSH_CONFIG, GPU_CONFIG, AnimationCaptures,
-    animation_protocol_error_kinds, assessment_flag, failed_animation_checks,
+    animation_protocol_error_kinds, animation_unexpected_error_phases,
+    assessment_flag, failed_animation_checks,
     verify_shader_inputs, verify_vulkan_capabilities,
     vulkan_environment,
 )
@@ -206,6 +207,18 @@ class AssessmentFlagTests(unittest.TestCase):
         self.assertEqual(animation_protocol_error_kinds(""), [])
         self.assertEqual(len(animation_protocol_error_kinds(
             (prefix + "unexpected stub at line 1\n") * 12)), 10)
+
+
+    def test_error_phases_are_allowlisted_and_never_include_raw_content(self):
+        prefix = "NX2_NATIVE_GPU_ANIMATION_UNEXPECTED_ERROR_PHASE="
+        report = (prefix + "after_guest_exit\\n" +
+                  prefix + "sensitive-message-or-path\\n" +
+                  "unexpected prefix after_guest_exit\\n")
+        self.assertEqual(animation_unexpected_error_phases(report),
+                         ["after_guest_exit", "unclassified"])
+        self.assertEqual(animation_unexpected_error_phases(""), [])
+        self.assertEqual(len(animation_unexpected_error_phases(
+            (prefix + "during_guest\\n") * 14)), 10)
 
 
 class AnimationCaptureTests(unittest.TestCase):

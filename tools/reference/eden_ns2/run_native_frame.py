@@ -231,6 +231,20 @@ def animation_protocol_error_kinds(report: str) -> list[str]:
     return kinds
 
 
+_ANIMATION_ERROR_PHASES = frozenset((
+    "before_guest", "during_guest", "after_complete_before_exit", "after_guest_exit",
+))
+
+
+def animation_unexpected_error_phases(report: str) -> list[str]:
+    """Read only allowlisted, coarse host-error timing; never retain raw details."""
+    prefix = "NX2_NATIVE_GPU_ANIMATION_UNEXPECTED_ERROR_PHASE="
+    observed = (line[len(prefix):] for line in report.splitlines()
+                if line.startswith(prefix))
+    return [phase if phase in _ANIMATION_ERROR_PHASES else "unclassified"
+            for phase in list(observed)[:10]]
+
+
 def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
           gpu: bool = False, clear_only: bool = False, animation: bool = False,
           eden_revision: str = EDEN_SHA) -> dict:
@@ -324,7 +338,8 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
                       protocol_error_count=sum(
                           line.startswith("NX2_NATIVE_GPU_ANIMATION_PROTOCOL_ERROR=")
                           for line in assessment.splitlines()),
-                      protocol_error_kinds=animation_protocol_error_kinds(assessment))
+                      protocol_error_kinds=animation_protocol_error_kinds(assessment),
+                      unexpected_error_phases=animation_unexpected_error_phases(assessment))
     (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print("NX2_FRAME_TRIAL " + json.dumps(result, sort_keys=True), flush=True)
     return result

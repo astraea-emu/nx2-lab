@@ -482,6 +482,12 @@ def assess_animation(raw: bytes, process_rc: int, captures: tuple[bytes, ...], v
                             if index < begin and pattern.fullmatch(line)), None)
             if allowed is None:
                 errors.append(f"unexpected error at line {index}")
+                # Classify timing only; never publish the runtime message.
+                phase = ("before_guest" if index < begin else
+                         "during_guest" if index < complete else
+                         "after_complete_before_exit" if index < exits[0][0] else
+                         "after_guest_exit")
+                print(f"NX2_NATIVE_GPU_ANIMATION_UNEXPECTED_ERROR_PHASE={phase}")
             else:
                 startup_counts[allowed] += 1
         if STUB.search(line) and index not in managers:

@@ -565,6 +565,31 @@ class AnimationTests(unittest.TestCase):
         self.assertFalse(accepted)
         self.assertIn("NX2_NATIVE_GPU_ANIMATION_RENDER_EVIDENCE_OK=0", output.getvalue())
 
+
+    def test_unexpected_runtime_error_phases_are_bounded_and_fail_closed(self):
+        redacted = b"[ 9.999] Test.Engine <Error> private runtime diagnostic\\n"
+        cases = (
+            ("before_guest", redacted + self.log),
+            ("during_guest", self.log.replace(animation_marker("BEGIN"),
+                animation_marker("BEGIN") + redacted, 1)),
+            ("after_complete_before_exit", self.log.replace(marker("COMPLETE"),
+                marker("COMPLETE") + redacted, 1)),
+            ("after_guest_exit", self.log + redacted),
+        )
+        for phase, log in cases:
+            with self.subTest(phase=phase):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    verified = gpu.assess_animation(log, 0, self.captures, 0,
+                        eden_revision=gpu.BASELINE_SHA)
+                self.assertFalse(verified)
+                report = output.getvalue()
+                self.assertIn(
+                    "NX2_NATIVE_GPU_ANIMATION_UNEXPECTED_ERROR_PHASE=" + phase, report)
+                self.assertIn("NX2_NATIVE_GPU_ANIMATION_RENDER_EVIDENCE_OK=0", report)
+                self.assertIn("NX2_NATIVE_GPU_ANIMATION_NOT_VERIFIED", report)
+                self.assertNotIn("private runtime diagnostic", report)
+
     def test_source_attributed_events_are_required_and_unique(self):
         fence = (b"Service.NVDRV <Info> core/hle/service/nvdrv/devices/nvdisp_disp0.cpp:114:Composite: "
                  b"Native composite waits for syncpoint=5/2, current=2\n")

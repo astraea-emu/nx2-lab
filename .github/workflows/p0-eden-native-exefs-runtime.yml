@@ -347,6 +347,7 @@ jobs:
                                           "failed_checks": item.get("failed_checks"),
                                           "protocol_error_count": item.get("protocol_error_count"),
                                           "protocol_error_kinds": item.get("protocol_error_kinds"),
+                                          "unexpected_error_phases": item.get("unexpected_error_phases"),
                                           "request_consumed": item.get("request_consumed"),
                                           "main_sha256": files.get("main"),
                                           "frame_sha256": [files.get(f"frame-{i}.tga")
