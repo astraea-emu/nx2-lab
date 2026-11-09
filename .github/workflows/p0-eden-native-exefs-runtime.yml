@@ -445,8 +445,8 @@ jobs:
           for engine, revision in revisions.items():
               root = roots / ('original-native-exefs-evidence-' + engine)
               if any(path.is_file() and path.suffix == '.log' for path in root.rglob('*')):
-              raise SystemExit(f'{engine}: raw host log present in evidence artifact')
-          observed[engine] = {}
+                  raise SystemExit(f'{engine}: raw host log present in evidence artifact')
+              observed[engine] = {}
               for family, variants in (('native-frame', ('variant-0', 'variant-1')),
                                        ('native-gpu', ('variant-0', 'variant-1', 'clear-only')),
                                        ('native-animation', ('variant-0', 'variant-1'))):
