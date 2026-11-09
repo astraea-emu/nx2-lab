@@ -185,6 +185,22 @@ def assessment_flag(report: str, name: str) -> bool | None:
     return values[0] == "1"
 
 
+_ANIMATION_ASSERTIONS = (
+    ("FIELDS_IN_ORDER", "EVENT_COUNTS_MATCH") +
+    tuple(f"FRAME_{frame}_{metric}" for frame in range(4)
+          for metric in ("FIELDS_MATCH", "ORDER_MATCH", "SUBMISSION_MATCH", "OWNERSHIP_MATCH")) +
+    ("RENDERER_VALID", "STARTUP_ERRORS_BOUNDED", "DISTINCT_HANDLES",
+     "OBJECTS_BOUND", "ADDRESSES_VALID", "LIFETIME_ORDER", "ORIGINAL_SHADERS",
+     "STABLE_OBJECTS", "TWO_BUFFERS_REUSED", "AVAILABILITY_LAYER", "CLEANUP_OBSERVED")
+)
+
+
+def failed_animation_checks(report: str) -> list[str]:
+    """Emit only allowlisted failed checks, not raw host or guest log content."""
+    return [name for name in _ANIMATION_ASSERTIONS
+            if assessment_flag(report, name) is False]
+
+
 def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
           gpu: bool = False, clear_only: bool = False, animation: bool = False,
           eden_revision: str = EDEN_SHA) -> dict:
@@ -270,9 +286,14 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
     if animation:
         # A correct render may precede a failed host shutdown. Report both
         # observations independently without changing acceptance.
-        result.update(render_evidence_ok=assessment_flag(report.getvalue(), "RENDER_EVIDENCE_OK"),
-                      cleanup_observed=assessment_flag(report.getvalue(), "CLEANUP_OBSERVED"),
-                      archived_frames=len(captures.events))
+        assessment = report.getvalue()
+        result.update(render_evidence_ok=assessment_flag(assessment, "RENDER_EVIDENCE_OK"),
+                      cleanup_observed=assessment_flag(assessment, "CLEANUP_OBSERVED"),
+                      archived_frames=len(captures.events),
+                      failed_checks=failed_animation_checks(assessment),
+                      protocol_error_count=sum(
+                          line.startswith("NX2_NATIVE_GPU_ANIMATION_PROTOCOL_ERROR=")
+                          for line in assessment.splitlines()))
     (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print("NX2_FRAME_TRIAL " + json.dumps(result, sort_keys=True), flush=True)
     return result

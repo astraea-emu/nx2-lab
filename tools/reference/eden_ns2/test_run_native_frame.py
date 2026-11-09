@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 from run_native_frame import (
     ANIMATION_CONFIG, CAPTURE_SIZE, CONFIG, FLUSH_CONFIG, GPU_CONFIG, AnimationCaptures,
-    assessment_flag, verify_shader_inputs, verify_vulkan_capabilities, vulkan_environment,
+    assessment_flag, failed_animation_checks, verify_shader_inputs, verify_vulkan_capabilities,
+    vulkan_environment,
 )
 
 
@@ -173,6 +174,21 @@ class AssessmentFlagTests(unittest.TestCase):
         self.assertIsNone(assessment_flag("prefix " + prefix + "1\n",
                                           "RENDER_EVIDENCE_OK"))
         self.assertIs(assessment_flag(prefix + "1\n", "RENDER_EVIDENCE_OK"), True)
+
+
+    def test_failure_checklist_is_allowlisted_and_distinct_from_host_rc(self):
+        report = ("NX2_NATIVE_GPU_ANIMATION_EVENT_COUNTS_MATCH=0\n"
+                  "NX2_NATIVE_GPU_ANIMATION_FRAME_0_ORDER_MATCH=0\n"
+                  "NX2_NATIVE_GPU_ANIMATION_FRAME_0_OWNERSHIP_MATCH=1\n"
+                  "NX2_NATIVE_GPU_ANIMATION_LIFETIME_ORDER=0\n"
+                  "NX2_NATIVE_GPU_ANIMATION_PROCESS_RC=0\n"
+                  "NX2_NATIVE_GPU_ANIMATION_UNTRUSTED=0\n")
+        self.assertEqual(failed_animation_checks(report),
+                         ["EVENT_COUNTS_MATCH", "FRAME_0_ORDER_MATCH", "LIFETIME_ORDER"])
+        # Contradictory duplicate evidence is unknown, never authoritative.
+        duplicate = report + "NX2_NATIVE_GPU_ANIMATION_EVENT_COUNTS_MATCH=1\n"
+        self.assertEqual(failed_animation_checks(duplicate),
+                         ["FRAME_0_ORDER_MATCH", "LIFETIME_ORDER"])
 
 
 class AnimationCaptureTests(unittest.TestCase):
