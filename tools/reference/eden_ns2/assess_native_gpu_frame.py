@@ -622,11 +622,14 @@ def assess_animation(raw: bytes, process_rc: int, captures: tuple[bytes, ...], v
               ("CLEANUP_OBSERVED", final_ok))
     for name, passed in checks:
         print(f"NX2_NATIVE_GPU_ANIMATION_{name}={int(passed)}")
-    passed = (process_rc == 0 and all(value for _, value in checks) and all(frame_results) and not errors)
-    if passed:
-        passed = all(verify_animation_pixels(capture, variant, frame)
-                     for frame, capture in enumerate(captures))
-    return finish(bool(passed))
+    # Rendering evidence is independently useful after an abnormal host exit,
+    # but never qualifies a trial whose process did not terminate naturally.
+    render_evidence_ok = all(value for _, value in checks) and all(frame_results) and not errors
+    if render_evidence_ok:
+        render_evidence_ok = all(verify_animation_pixels(capture, variant, frame)
+                                 for frame, capture in enumerate(captures))
+    print(f"NX2_NATIVE_GPU_ANIMATION_RENDER_EVIDENCE_OK={int(render_evidence_ok)}")
+    return finish(bool(render_evidence_ok and process_rc == 0))
 
 
 def main() -> int:
