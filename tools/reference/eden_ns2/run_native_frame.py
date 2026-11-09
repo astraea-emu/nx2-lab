@@ -175,6 +175,16 @@ def verify_vulkan_capabilities(output: Path, icd: Path) -> None:
         raise ValueError(f"Lavapipe/X11 capabilities not established; inspect {log_name} (rc={rc})")
 
 
+def assessment_flag(report: str, name: str) -> bool | None:
+    """Read one exact assessor diagnostic; missing or ambiguous means unknown."""
+    prefix = f"NX2_NATIVE_GPU_ANIMATION_{name}="
+    values = [line.removeprefix(prefix) for line in report.splitlines()
+              if line.startswith(prefix)]
+    if len(values) != 1 or values[0] not in ("0", "1"):
+        return None
+    return values[0] == "1"
+
+
 def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
           gpu: bool = False, clear_only: bool = False, animation: bool = False,
           eden_revision: str = EDEN_SHA) -> dict:
@@ -257,6 +267,12 @@ def trial(cli: Path, output: Path, icd: Path, prefix: str, variant: int, *,
               "runtime_seconds": round(runtime_seconds, 3),
               "eden_environment": {key: value for key, value in env.items() if key.startswith("EDEN_")},
               "files": {p.name: digest(p) for p in files if p.is_file()}}
+    if animation:
+        # A correct render may precede a failed host shutdown. Report both
+        # observations independently without changing acceptance.
+        result.update(render_evidence_ok=assessment_flag(report.getvalue(), "RENDER_EVIDENCE_OK"),
+                      cleanup_observed=assessment_flag(report.getvalue(), "CLEANUP_OBSERVED"),
+                      archived_frames=len(captures.events))
     (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print("NX2_FRAME_TRIAL " + json.dumps(result, sort_keys=True), flush=True)
     return result
