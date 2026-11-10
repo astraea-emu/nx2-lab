@@ -69,7 +69,7 @@ jobs:
           sudo apt-get update -qq
           read -r -a packages <<< "$(python3 nx2/tools/reference/eden_ns2/build_native_engine.py --print-packages)"
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${packages[@]}"
-      - name: Apply exact-source reviewed guest-exit repair only in isolated checkout
+      - name: Apply exact-source isolated guest-exit and NPDM signature guards
         run: |
           set -euo pipefail
           python3 nx2/tools/reference/eden_ns2/modern_exit_overlay.py "$ENGINE" candidate
