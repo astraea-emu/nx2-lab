@@ -576,7 +576,16 @@ _start:
     str w4, [x22, #F_present_tail02]
     str w5, [x22, #F_present_tail03]
     tipc_check present, 229, 0, 7
+/* The pinned modern VI2 implementation replies with AvailableSlots=0x7fff
+ * immediately after its direct present. The frozen Eden queue contract is
+ * 0x7ffe (one slot still owned by the compositor). Preserve both semantics
+ * and independently require a real saved capture before graphics acceptance.
+ */
+.if NX2_FRAME_MODERN_DIRECT_VI2
+    check_u64 present, 0x7fff
+.else
     check_u64 present, 0x7ffe
+.endif
     add x9, x22, #F_present_tail00
     ldp x0, x1, [x9]
     orr x0, x0, x1

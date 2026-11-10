@@ -308,5 +308,25 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
             compile_frame_segments(modern_direct_vi2=1)
 
 
+    def test_modern_direct_vi2_present_reply_matches_source_defined_available_slots(self):
+        assembly = Path(__file__).with_name("native_frame_probe.S").read_text()
+        self.assertIn(
+            ".if NX2_FRAME_MODERN_DIRECT_VI2\\n"
+            "    check_u64 present, 0x7fff\\n"
+            ".else\\n"
+            "    check_u64 present, 0x7ffe\\n"
+            ".endif", assembly)
+        # Do not replace the original guest or its image specification.
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        legacy = compile_frame_segments(prefix, variant=1)
+        modern = compile_frame_segments(
+            prefix, variant=1, copy_tipc_handles=True,
+            observe_invalid_size=True, modern_direct_vi2=True)
+        self.assertNotEqual(modern[0], legacy[0])
+        self.assertEqual(modern[1:], legacy[1:])
+        verify_frame_fixture(build_frame_nso(modern), build_extended_npdm(), 1)
+
+
+
 if __name__ == "__main__":
     unittest.main()
