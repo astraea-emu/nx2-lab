@@ -50,6 +50,56 @@ def expected_pixels(variant: int) -> bytes:
     return b"".join(rows)
 
 
+
+def original_pixel_difference(actual: bytes, expected: bytes) -> dict:
+    """Lossy evidence from the project-authored pattern, not a captured image.
+
+    The independent exact-byte equality remains the sole positive-pixel gate.
+    Never upload captured pixels, raw host logs, or unbounded histograms.
+    """
+    if len(actual) != len(expected) or len(actual) != TGA_W * TGA_H * 4:
+        raise ValueError("Original pixel diagnostics require exact frame byte count")
+    first = next((i for i, (a, b) in enumerate(zip(actual, expected))
+                  if a != b), None)
+    different = sum(actual[i:i + 4] != expected[i:i + 4]
+                    for i in range(0, len(actual), 4))
+    probes = (
+        ("top_left", 0, 0),
+        ("top_right", TGA_W - 1, 0),
+        ("bottom_left", 0, TGA_H - 1),
+        ("bottom_right", TGA_W - 1, TGA_H - 1),
+        ("center", TGA_W // 2, TGA_H // 2),
+        ("inner", SCALE * 5 + SCALE // 2, SCALE * 3 + SCALE // 2),
+    )
+    samples = []
+    for label, x, y in probes:
+        offset = (y * TGA_W + x) * 4
+        samples.append({"position": label, "expected_bgra": list(expected[offset:offset + 4]),
+                        "actual_bgra": list(actual[offset:offset + 4])})
+    if first is None:
+        mismatch = None
+    else:
+        pixel, channel = divmod(first, 4)
+        start = pixel * 4
+        mismatch = {
+            "x": pixel % TGA_W, "y": pixel // TGA_W,
+            "channel": "BGRA"[channel],
+            "expected_bgra": list(expected[start:start + 4]),
+            "actual_bgra": list(actual[start:start + 4]),
+        }
+    return {
+        "mismatched_pixel_count": different,
+        "total_pixel_count": TGA_W * TGA_H,
+        "first_mismatch": mismatch,
+        "fixed_original_pattern_probes": samples,
+        "red_blue_swapped_exact_match": all(
+            actual[i] == expected[i + 2] and actual[i + 1] == expected[i + 1]
+            and actual[i + 2] == expected[i] and actual[i + 3] == expected[i + 3]
+            for i in range(0, len(actual), 4)),
+        "raw_capture_preserved": False,
+    }
+
+
 def check_capture(capture: bytes, variant: int) -> dict:
     """Exact 1280x720 BGRA pixels; honor TGA top/bottom row-order bit."""
     expected = expected_pixels(variant)
@@ -60,6 +110,7 @@ def check_capture(capture: bytes, variant: int) -> dict:
         and capture[16] == 32 and capture[17] in (0x28, 0x08)
     )
     pixels_ok = False
+    differences = None
     if header_ok:
         actual = capture[18:]
         if capture[17] == 0x08:
@@ -67,12 +118,15 @@ def check_capture(capture: bytes, variant: int) -> dict:
             actual = b"".join(actual[i:i + stride]
                               for i in range(len(actual) - stride, -1, -stride))
         pixels_ok = actual == expected
+        if not pixels_ok:
+            differences = original_pixel_difference(actual, expected)
     return {
         "capture_present": bool(capture),
         "capture_bytes": len(capture),
         "capture_sha256": hashlib.sha256(capture).hexdigest() if capture else None,
         "original_tga_header_match": bool(header_ok),
         "every_original_pixel_match": bool(pixels_ok),
+        "bounded_mismatch_diagnostics": differences,
     }
 
 
@@ -138,6 +192,33 @@ def original_invalid_size_observation(raw: bytes) -> dict:
         "original_rejection_observed": bool(rejection),
         "returned_code": f"0x{values['result']:08x}",
         "returned_size": values["lo"] | (values["hi"] << 32),
+    }
+
+
+
+FINALIZE_FIELDS = ("transport", "header0", "header1", "result")
+FINALIZE_FIELD = re.compile(
+    rb"NX2_FRAME display_finalize_(transport|header0|header1|result)=([0-9a-f]{8})"
+)
+
+
+def original_finalize_observation(raw: bytes) -> dict:
+    """Only four original guest-owned response words; no raw messages or URLs."""
+    fields = {name: [] for name in FINALIZE_FIELDS}
+    for name, value in FINALIZE_FIELD.findall(raw):
+        fields[name.decode()].append(int(value, 16))
+    if any(len(fields[name]) != 1 for name in FINALIZE_FIELDS):
+        return {"fields_observed_once": False}
+    values = {name: fields[name][0] for name in FINALIZE_FIELDS}
+    return {
+        "fields_observed_once": True,
+        "transport": values["transport"],
+        "header0": values["header0"],
+        "header1": values["header1"],
+        "result_code": f"0x{values['result']:08x}",
+        "legacy_reply_shape_match": (
+            values["transport"] == 0 and values["header0"] == 16 + 303
+            and values["header1"] == 1 and values["result"] == 0),
     }
 
 
@@ -213,6 +294,7 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
         "natural_exit": rc == 0, "process_rc": rc, "elapsed_seconds": elapsed,
         "original_guest_markers": markers,
         "original_guest_failure_stage": original_guest_failure_step(raw),
+        "original_finalize_reply": original_finalize_observation(raw),
         "host_graphics_mapping_categories": original_graphics_device_mapping_observation(raw),
         "original_invalid_image_size_control": size_observation,
         "capture_count": len(cap_files),

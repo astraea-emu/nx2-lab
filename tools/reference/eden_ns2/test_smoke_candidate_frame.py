@@ -8,6 +8,7 @@ from smoke_candidate_frame import (
     HEIGHT, SCALE, TGA_H, TGA_W, WIDTH, check_capture, expected_pixels,
     original_guest_failure_step, original_invalid_size_observation,
     original_graphics_device_mapping_observation,
+    original_pixel_difference, original_finalize_observation,
 )
 
 
@@ -124,6 +125,52 @@ class ModernOriginalPixelsTests(unittest.TestCase):
             b"NX2_FRAME fail_step=00000029\n")["stage"], "gpu_address_space_close")
         self.assertFalse(original_guest_failure_step(
             b"NX2_FRAME fail_step=0000002a\n")["step_observed_once"])
+
+
+
+    def test_original_pixel_difference_is_bounded_and_precise(self):
+        raw = expected_pixels(0)
+        result = original_pixel_difference(raw, raw)
+        self.assertEqual(result["mismatched_pixel_count"], 0)
+        self.assertIsNone(result["first_mismatch"])
+        self.assertEqual(len(result["fixed_original_pattern_probes"]), 6)
+        self.assertFalse(result["raw_capture_preserved"])
+        damaged = bytearray(raw)
+        # Deliberately change only the blue byte of the very first pixel.
+        damaged[0] ^= 7
+        report = original_pixel_difference(bytes(damaged), raw)
+        self.assertEqual(report["mismatched_pixel_count"], 1)
+        self.assertEqual(report["first_mismatch"]["x"], 0)
+        self.assertEqual(report["first_mismatch"]["y"], 0)
+        self.assertEqual(report["first_mismatch"]["channel"], "B")
+        self.assertFalse(report["red_blue_swapped_exact_match"])
+        self.assertNotIn("private-path", str(report))
+
+    def test_capture_mismatch_is_diagnostic_not_a_pass(self):
+        original = make_tga(0)
+        corrupted = bytearray(original)
+        corrupted[18] ^= 7
+        evidence = check_capture(bytes(corrupted), 0)
+        self.assertFalse(evidence["every_original_pixel_match"])
+        self.assertEqual(evidence["bounded_mismatch_diagnostics"]["mismatched_pixel_count"], 1)
+        self.assertIsNone(check_capture(original, 0)["bounded_mismatch_diagnostics"])
+        self.assertIsNone(check_capture(original[:-1], 0)["bounded_mismatch_diagnostics"])
+
+    def test_cleanup_numeric_response_is_redacted_and_fail_closed(self):
+        valid = b"".join(
+            f"NX2_FRAME display_finalize_{name}={value:08x}\n".encode()
+            for name, value in (("transport", 0), ("header0", 319),
+                                ("header1", 1), ("result", 0)))
+        good = original_finalize_observation(valid + b"private-path")
+        self.assertTrue(good["fields_observed_once"])
+        self.assertTrue(good["legacy_reply_shape_match"])
+        self.assertNotIn("private-path", str(good))
+        bad = original_finalize_observation(
+            valid.replace(b"header1=00000001", b"header1=00000002"))
+        self.assertTrue(bad["fields_observed_once"])
+        self.assertFalse(bad["legacy_reply_shape_match"])
+        self.assertFalse(original_finalize_observation(valid + valid)["fields_observed_once"])
+        self.assertFalse(original_finalize_observation(b"")["fields_observed_once"])
 
 
 
