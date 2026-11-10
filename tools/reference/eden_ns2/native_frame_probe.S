@@ -338,9 +338,10 @@ field_names:
     mov w7, #0x80000001
     cmp w2, w7
     b.ne failure
-/* Only the explicit modern guest build accepts copied session handles. */
+/* Pinned modern IPC::HandleDescriptorHeader: copy count at bits [1..4],
+ * move count at bits [5..8] (src/core/hle/ipc.h). One copy is 0x02. */
 .if NX2_FRAME_TIPC_COPY_HANDLES
-    cmp w3, #0x10
+    cmp w3, #0x02
 .else
     cmp w3, #0x20
 .endif

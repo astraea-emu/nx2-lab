@@ -2,6 +2,7 @@
 """Actual assembly and bounded-container regressions; never renderer evidence."""
 import hashlib
 import os
+from pathlib import Path
 import struct
 import unittest
 
@@ -266,6 +267,16 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
     def test_copy_handle_mode_requires_explicit_boolean(self):
         with self.assertRaisesRegex(ValueError, "copy_tipc_handles must be boolean"):
             compile_frame_segments(copy_tipc_handles=1)
+
+    def test_modern_copy_handle_descriptor_uses_actual_upstream_bitfield(self):
+        assembly = Path(__file__).with_name("native_frame_probe.S").read_text()
+        # Pinned IPC HandleDescriptorHeader: copy-count at bit 1, move at bit 5.
+        self.assertIn(
+            ".if NX2_FRAME_TIPC_COPY_HANDLES\n"
+            "    cmp w3, #0x02\n"
+            ".else\n"
+            "    cmp w3, #0x20\n"
+            ".endif", assembly)
 
 
 if __name__ == "__main__":
