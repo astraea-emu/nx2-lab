@@ -1,5 +1,20 @@
 # Status
 
+## November 9 development (unmerged; main remains at November 1 status)
+
+[Draft GPU animation PR #46](https://github.com/astraea-emu/nx2-lab/pull/46)
+has generated independently checked original four-frame GPU output, two-buffer
+reuse and both motion variants. Candidate-Eden stress nevertheless intermittently
+fails **after guest exit** with host code 137. A passing 20/20 run did not
+establish a fix. The PR remains draft; no production adoption is authorized.
+
+The separate modern-engine qualification compares pinned Eglantine and Lichii
+against our Eden baseline using source-verified, original ExeFS loader/ARM64
+execution controls first. The selected root source license materials are GPLv3,
+but dependency license review and comparable full GPU/IPC/animation execution
+remain outstanding. No commercial-game compatibility is claimed. See
+[Plan](PLAN.md) and [Issue #21](https://github.com/astraea-emu/nx2-lab/issues/21).
+
 **Verified 2026-11-01. Production-engine adoption: HOLD.**
 
 NX2 is useful as a regression lab. Its own `nx2lab` executable is a bounded
