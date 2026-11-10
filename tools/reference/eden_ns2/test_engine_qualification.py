@@ -124,10 +124,10 @@ class SmokeTests(unittest.TestCase):
     def test_fault_taxonomy_is_bounded_and_never_contains_raw_messages(self):
         messages = (
             "[ 0.01] Frontend <Warning> secret.cpp:12:Boot: "
-            "Assertion in private-user-path\\n"
+            "Assertion in private-user-path\n"
             "[ 0.02] Kernel.SVC <Error> private.cpp:22:Fault: "
-            "ExceptionRaised private-key\\n"
-            "unattributed runtime error: private-value\\n"
+            "ExceptionRaised private-key\n"
+            "unattributed runtime error: private-value\n"
         )
         report = fault_signatures(messages.splitlines())
         self.assertEqual(report["categories"]["assertion"], 1)
@@ -142,7 +142,7 @@ class SmokeTests(unittest.TestCase):
     def test_fault_signatures_remain_strict_runtime_rejection(self):
         positive_fault = self.good + (
             b"[ 1.0] Frontend <Error> file.cpp:1:Start: "
-            b"Assertion at private-path\\n"
+            b"Assertion at private-path\n"
         )
         result = assess_silently(positive_fault, self.bad, 0, 1)
         self.assertFalse(result["original_controls_pass"])
@@ -151,7 +151,7 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(result["positive_lifecycle"]
                          ["fault_signature_evidence"]["categories"]["assertion"], 1)
 
-        negative_fault = self.bad + b"runtime error: private-token\\n"
+        negative_fault = self.bad + b"runtime error: private-token\n"
         result = assess_silently(self.good, negative_fault, 0, 1)
         self.assertFalse(result["original_controls_pass"])
         self.assertEqual(result["first_stop"],
