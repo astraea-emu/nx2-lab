@@ -144,10 +144,10 @@ class SmokeTests(unittest.TestCase):
             root = Path(directory)
             source = root / "src/core/guest.cpp"
             source.parent.mkdir(parents=True)
-            source.write_text("// SPDX-License-Identifier: GPL-3.0-or-later\\n")
+            source.write_text("// SPDX-License-Identifier: GPL-3.0-or-later\n")
             raw = ("[ 0.0123] Debug <Critical> core/guest.cpp:1:Run: "
                    "/private/build/src/core/guest.cpp: assert "
-                   "private-assertion-argument\\n")
+                   "private-assertion-argument\n")
             report = fault_signatures(raw.splitlines(), root)
             self.assertEqual(report["source_stages"]["host_debug"], 1)
             self.assertEqual(report["categories"]["assertion"], 1)
