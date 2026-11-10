@@ -1030,7 +1030,35 @@ cleanup:
     release pool_destroy_request, 5, pool_destroy, 314, 3, 37, image_id
     release image_destroy_request, 5, image_destroy, 430, 2, 38, image_id
     release memory_destroy_request, 5, memory_destroy, 112, 1, 39, memory_id
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP
+    /* The pinned modern GSV calls 303 a generic 32-word zeroed STUB. This is
+     * NOT proof of native display finalization: require its exact source reply
+     * and retain full original/negative qualification as separately failed.
+     * All real memory/image/pool releases and NVDRV closes remain required.
+     */
+    tbz x20, #0, .Lmodern_303_done
+    bic x20, x20, #1
+    prepare display_finalize_request
+    send 5, display_finalize
+    tipc_check display_finalize, 303, 0, 33, .Lmodern_303_bad
+    add x9, x21, #12
+    mov w10, #32
+.Lmodern_303_zeros:
+    ldr w11, [x9], #4
+    cbnz w11, .Lmodern_303_bad
+    subs w10, w10, #1
+    b.ne .Lmodern_303_zeros
+    emit modern_finalize_stub
+    b .Lmodern_303_done
+.Lmodern_303_bad:
+    ldr w0, [x22, #F_fail_step]
+    cbnz w0, .Lmodern_303_done
+    mov w0, #40
+    str w0, [x22, #F_fail_step]
+.Lmodern_303_done:
+.else
     release display_finalize_request, 5, display_finalize, 303, 0, 40
+.endif
 .if NX2_FRAME_MODERN_GPU_IMAGE_MAP
     bl modern_gpu_close_as
     cbz w0, .Lmodern_closed
@@ -1374,6 +1402,9 @@ modern_gpu_registered_message_end:
 modern_as_closed_message:
     .ascii "NX2_FRAME_MODERN_AS_CLOSED\n"
 modern_as_closed_message_end:
+modern_finalize_stub_message:
+    .ascii "NX2_FRAME_MODERN_FINALIZE_STUB\n"
+modern_finalize_stub_message_end:
 .endif
 
 .section .data, "aw"

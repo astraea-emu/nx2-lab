@@ -219,6 +219,9 @@ def original_finalize_observation(raw: bytes) -> dict:
         "legacy_reply_shape_match": (
             values["transport"] == 0 and values["header0"] == 16 + 303
             and values["header1"] == 1 and values["result"] == 0),
+        "modern_303_stub_shape_match": (
+            values["transport"] == 0 and values["header0"] == 16 + 303
+            and values["header1"] == 33 and values["result"] == 0),
     }
 
 
@@ -299,9 +302,11 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
                             "MODERN_AS_OPENED", "MODERN_AS_INITIALIZED",
                             "MODERN_IMAGE_REGISTERED", "MODERN_AS_CLOSED",
                             "MODERN_CTRL_OPENED", "MODERN_CTRL_CHARACTERIZED",
-                            "MODERN_CTRL_CLOSED")}
-    positive = rc == 0 and pixel["every_original_pixel_match"] and all(
-        count == 1 for count in markers.values())
+                            "MODERN_CTRL_CLOSED", "MODERN_FINALIZE_STUB")}
+    finalize_observation = original_finalize_observation(raw)
+    positive = (rc == 0 and pixel["every_original_pixel_match"] and
+                all(count == 1 for count in markers.values()) and
+                finalize_observation.get("modern_303_stub_shape_match", False))
     size_observation = original_invalid_size_observation(raw)
     return {
         "variant": variant,
@@ -310,7 +315,10 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
         "natural_exit": rc == 0, "process_rc": rc, "elapsed_seconds": elapsed,
         "original_guest_markers": markers,
         "original_guest_failure_stage": original_guest_failure_step(raw),
-        "original_finalize_reply": original_finalize_observation(raw),
+        "original_finalize_reply": finalize_observation,
+        "observed_modern_303_is_upstream_stub_not_finalization": bool(
+            markers["MODERN_FINALIZE_STUB"] == 1 and
+            finalize_observation.get("modern_303_stub_shape_match", False)),
         "host_graphics_mapping_categories": original_graphics_device_mapping_observation(raw),
         "original_invalid_image_size_control": size_observation,
         "capture_count": len(cap_files),

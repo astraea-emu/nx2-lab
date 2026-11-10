@@ -178,11 +178,17 @@ class ModernOriginalPixelsTests(unittest.TestCase):
         good = original_finalize_observation(valid + b"private-path")
         self.assertTrue(good["fields_observed_once"])
         self.assertTrue(good["legacy_reply_shape_match"])
+        self.assertFalse(good["modern_303_stub_shape_match"])
         self.assertNotIn("private-path", str(good))
         bad = original_finalize_observation(
             valid.replace(b"header1=00000001", b"header1=00000002"))
         self.assertTrue(bad["fields_observed_once"])
         self.assertFalse(bad["legacy_reply_shape_match"])
+        self.assertFalse(bad["modern_303_stub_shape_match"])
+        modern_stub = original_finalize_observation(
+            valid.replace(b"header1=00000001", b"header1=00000021"))
+        self.assertTrue(modern_stub["modern_303_stub_shape_match"])
+        self.assertFalse(modern_stub["legacy_reply_shape_match"])
         self.assertFalse(original_finalize_observation(valid + valid)["fields_observed_once"])
         self.assertFalse(original_finalize_observation(b"")["fields_observed_once"])
 

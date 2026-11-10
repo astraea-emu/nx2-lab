@@ -375,5 +375,24 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
         self.assertIn("modern_ctrl_closed_message:", assembly)
 
 
+    def test_modern_303_stub_is_checked_without_changing_frozen_finalization(self):
+        original = Path(__file__).with_name("native_frame_probe.S").read_text()
+        self.assertIn("tipc_check display_finalize, 303, 0, 33, .Lmodern_303_bad", original)
+        self.assertIn("    mov w10, #32\n.Lmodern_303_zeros:\n", original)
+        self.assertIn("    cbnz w11, .Lmodern_303_bad\n", original)
+        self.assertIn("    emit modern_finalize_stub\n", original)
+        self.assertIn(".else\n    release display_finalize_request, 5, display_finalize, 303, 0, 40\n.endif", original)
+        self.assertIn(".ascii \"NX2_FRAME_MODERN_FINALIZE_STUB\\n\"", original)
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        baseline = compile_frame_segments(prefix, variant=1)
+        modern = compile_frame_segments(
+            prefix, variant=1, copy_tipc_handles=True, observe_invalid_size=True,
+            modern_direct_vi2=True, modern_gpu_image_map=True)
+        self.assertNotEqual(modern[0], baseline[0])
+        # Original authored image pages and record layout remain fixed.
+        self.assertEqual(modern[2], baseline[2])
+        verify_frame_fixture(build_frame_nso(modern), build_extended_npdm(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
