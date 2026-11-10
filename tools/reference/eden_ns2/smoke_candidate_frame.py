@@ -101,7 +101,9 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
     work.mkdir()
     guest = work / "guest"
     guest.mkdir()
-    parts = compile_frame_segments("aarch64-linux-gnu-", variant=variant)
+    # Eglantine/Lichii return copied GSV session handles, unlike frozen Eden.
+    parts = compile_frame_segments("aarch64-linux-gnu-", variant=variant,
+                                   copy_tipc_handles=True)
     main, npdm = build_frame_nso(parts), build_extended_npdm()
     verify_frame_fixture(main, npdm, variant)
     (guest / "main").write_bytes(main)
@@ -195,7 +197,9 @@ def main() -> int:
         receipt = {
             "kind": "nx2-original-modern-cpu-image-v1",
             "candidate": a.candidate, "revision": source["commit"],
-            "approved_exit_adapter": True, "source_built_cli_sha256": sha,
+            "approved_exit_adapter": True,
+            "original_guest_tipc_copy_handle_adapter": True,
+            "source_built_cli_sha256": sha,
             "software_vulkan_icd": manifests[0].name,
             "two_variants_produce_different_captures": bool(different),
             "original_graphics_pass": bool(success),

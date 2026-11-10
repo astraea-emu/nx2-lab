@@ -249,5 +249,24 @@ class NativeGpuFixtureTests(unittest.TestCase):
             compile_frame_segments(clear_only=True)
 
 
+class ModernCopiedSessionHandleTests(unittest.TestCase):
+    """Explicit new guest adapter; default pinned Eden program remains byte-identical."""
+
+    def test_modern_handle_adapter_only_changes_original_instructions(self):
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        baseline = compile_frame_segments(prefix, variant=0)
+        modern = compile_frame_segments(prefix, variant=0, copy_tipc_handles=True)
+        self.assertNotEqual(modern[0], baseline[0])
+        self.assertEqual(modern[1:], baseline[1:])
+        nso = build_frame_nso(modern)
+        verify_frame_fixture(nso, build_extended_npdm(), 0)
+        self.assertEqual(modern, compile_frame_segments(
+            prefix, variant=0, copy_tipc_handles=True))
+
+    def test_copy_handle_mode_requires_explicit_boolean(self):
+        with self.assertRaisesRegex(ValueError, "copy_tipc_handles must be boolean"):
+            compile_frame_segments(copy_tipc_handles=1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,13 @@
 .ifndef NX2_GPU_PROBE
     .set NX2_GPU_PROBE, 0
 .endif
+/* Modern GSV sessions return copied TIPC handles; frozen Eden used moved. */
+.ifndef NX2_FRAME_TIPC_COPY_HANDLES
+    .set NX2_FRAME_TIPC_COPY_HANDLES, 0
+.endif
+.if (NX2_FRAME_TIPC_COPY_HANDLES != 0) && (NX2_FRAME_TIPC_COPY_HANDLES != 1)
+    .error "NX2_FRAME_TIPC_COPY_HANDLES must be 0 or 1"
+.endif
 .if (NX2_FRAME_VARIANT != 0) && (NX2_FRAME_VARIANT != 1)
     .error "NX2_FRAME_VARIANT must be 0 or 1"
 .endif
@@ -331,7 +338,12 @@ field_names:
     mov w7, #0x80000001
     cmp w2, w7
     b.ne failure
+/* Only the explicit modern guest build accepts copied session handles. */
+.if NX2_FRAME_TIPC_COPY_HANDLES
+    cmp w3, #0x10
+.else
     cmp w3, #0x20
+.endif
     b.ne failure
     admit \slot
     cbnz w5, failure

@@ -10,6 +10,9 @@ on:
       - 'tools/reference/eden_ns2/test_modern_exit_overlay.py'
       - 'tools/reference/eden_ns2/smoke_candidate_frame.py'
       - 'tools/reference/eden_ns2/test_smoke_candidate_frame.py'
+      - 'tools/reference/eden_ns2/native_frame_probe.S'
+      - 'tools/reference/eden_ns2/make_native_frame_exefs.py'
+      - 'tools/reference/eden_ns2/test_make_native_frame_exefs.py'
   workflow_dispatch:
 permissions:
   contents: read
