@@ -69,7 +69,7 @@ class ModernOriginalPixelsTests(unittest.TestCase):
             b"NX2_FRAME fail_step=00000000")["stage"], "completed")
 
     def test_missing_duplicated_or_out_of_contract_stage_rejected(self):
-        for raw in (b"", b"NX2_FRAME fail_step=00000029",
+        for raw in (b"", b"NX2_FRAME fail_step=0000002a",
                     b"NX2_FRAME fail_step=00000001\n"
                     b"NX2_FRAME fail_step=00000002"):
             with self.subTest(raw=raw):

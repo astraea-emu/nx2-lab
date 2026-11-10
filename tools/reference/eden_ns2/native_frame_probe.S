@@ -562,7 +562,8 @@ _start:
     prepare modern_gpu_register_image_request
     address x0, image_buffer
     str x0, [x21, #8]
-    add x0, x0, #8191
+    mov x9, #8191
+    add x0, x0, x9
     str x0, [x21, #16]
     ldr w0, [x19, #28]
     svc #0x21
