@@ -335,8 +335,13 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
         previous = compile_frame_segments(prefix, **args)
         mapped = compile_frame_segments(prefix, **args, modern_gpu_image_map=True)
         self.assertNotEqual(mapped[0], previous[0])
-        self.assertEqual(mapped[1], previous[1])
-        self.assertNotEqual(mapped[2], previous[2])  # only ephemeral mapping state
+        # Modern-only IPC templates append to the original read-only segment.
+        # Every pre-existing original byte and both image pages stay identical.
+        self.assertTrue(mapped[1].startswith(previous[1]))
+        self.assertGreater(len(mapped[1]), len(previous[1]))
+        self.assertNotEqual(mapped[2][:4096], previous[2][:4096])
+        self.assertEqual(mapped[2][4096:], previous[2][4096:])
+        self.assertEqual(len(mapped[2]), 0x3000)
         verify_frame_fixture(build_frame_nso(mapped), build_extended_npdm(), 0)
         self.assertEqual(mapped, compile_frame_segments(
             prefix, **args, modern_gpu_image_map=True))
