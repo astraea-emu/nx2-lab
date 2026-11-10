@@ -1,6 +1,43 @@
 # Plan
 
-## Milestone: an original animated guest
+## Mission and primary engine-qualification gate
+
+NX2 aims to become a leading Nintendo Switch 2 emulator through **verified real
+software compatibility, correctness, stability, performance and cross-platform
+support**. This is an engineering goal, not a current claim. Use a mature,
+properly licensed emulator foundation rather than rebuilding subsystems without
+a demonstrated advantage. NX2 Lab currently provides reproducible original
+guest workloads, not a standalone game-capable emulator.
+
+Investigate the pinned Eden-NS2 baseline
+`b2cef0c0f2e8517673233e22c929918e2c60e654` alongside Eglantine
+`78743f30c251f66bd77e6eea6c28d8632d642d6f` and Lichii
+`7afad5494e650edfc169624be54e606f54b079ec`. Preserve their original
+GPL notices and separately review third-party dependencies. The
+[engine ExeFS qualification](../.github/workflows/p0-engine-original-exefs.yml)
+first verifies exact source and executes the **same project-authored ARM64
+program plus malformed-loader control** with bounded host exit. It is an
+initial compatibility observation, not final engine selection or proof of
+commercial-game support. Keep old engine patches unapplied until justified.
+
+Next carry unchanged original CPU, loader, IPC, VI2, GPU, clear-only and animated
+workloads across the candidates. Distinguish test-adapter incompatibility from
+engine defects; require natural process exit, negative controls, independently
+checked pixels, resource ownership and repeated runs. After an engine qualifies,
+advance to input-driven graphics, independent homebrew and legally obtained
+real-game testing. Measure compatibility tiers, crash rate, p50/p95/p99 frame
+times, shader stutter and RAM/VRAM, with real Windows/Linux/Apple Silicon
+runtime qualification.
+
+Keep [PR #46](https://github.com/astraea-emu/nx2-lab/pull/46) draft and
+unmerged until its post-guest-exit shutdown failure is repaired and privately
+reviewed under [Security](SECURITY.md). After two focused unsuccessful
+diagnostic iterations, preserve its failure evidence and make progress on the
+nonconflicting engine-qualification gate; never weaken acceptance to obtain
+green CI. Reassess the primary engine choice after two measured unsuccessful
+iterations, keeping the existing competitive radar as leads rather than proof.
+
+## Held reliability gate: an original animated guest
 
 Use the development revision selected by the [engine comparison](https://github.com/astraea-emu/nx2-lab/pull/45)
 and recorded in [Status](STATUS.md). Advance the original static triangle to a
