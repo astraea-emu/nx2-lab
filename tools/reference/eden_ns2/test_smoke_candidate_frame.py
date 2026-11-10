@@ -156,6 +156,19 @@ class ModernOriginalPixelsTests(unittest.TestCase):
         self.assertIsNone(check_capture(original, 0)["bounded_mismatch_diagnostics"])
         self.assertIsNone(check_capture(original[:-1], 0)["bounded_mismatch_diagnostics"])
 
+    def test_channel_swapped_capture_still_fails_exact_pixel_gate(self):
+        expected = expected_pixels(1)
+        swapped = bytearray(expected)
+        for offset in range(0, len(swapped), 4):
+            swapped[offset], swapped[offset + 2] = swapped[offset + 2], swapped[offset]
+        report = original_pixel_difference(bytes(swapped), expected)
+        self.assertTrue(report["red_blue_swapped_exact_match"])
+        self.assertGreater(report["mismatched_pixel_count"], 0)
+        tga = make_tga(1)[:18] + swapped
+        self.assertFalse(check_capture(bytes(tga), 1)["every_original_pixel_match"])
+        with self.assertRaises(ValueError):
+            original_pixel_difference(expected[:-4], expected)
+
     def test_cleanup_numeric_response_is_redacted_and_fail_closed(self):
         valid = b"".join(
             f"NX2_FRAME display_finalize_{name}={value:08x}\n".encode()
