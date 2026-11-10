@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-only
+"""Execute NX2's existing original CPU-drawn image on a pinned modern engine.
+
+This is an exploratory graphics milestone, NOT an engine adoption/security gate.
+No external games or SDK, new guest graphics implementation, or raw host logs.
+The separate original malformed-loader control remains mandatory and failing.
+"""
+from __future__ import annotations
+
+import argparse
+from functools import lru_cache
+import hashlib
+import json
+import os
+from pathlib import Path
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import time
+
+from assess_native_frame import logical_pixel
+from make_native_frame_exefs import (
+    build_frame_nso, compile_frame_segments, verify_frame_fixture,
+)
+from make_native_exefs import build_extended_npdm
+from modern_exit_overlay import verify_applied
+from smoke_candidate_exefs import built_cli, lifecycle
+
+WIDTH, HEIGHT, SCALE = 16, 9, 80
+TGA_W, TGA_H = WIDTH * SCALE, HEIGHT * SCALE
+TGA_BYTES = 18 + TGA_W * TGA_H * 4
+MAX_LOG = 8 * 1024 * 1024
+
+
+@lru_cache(maxsize=2)
+def expected_pixels(variant: int) -> bytes:
+    if type(variant) is not int or variant not in (0, 1):
+        raise ValueError("Original image variant must be 0 or 1")
+    rows = []
+    for y in range(HEIGHT):
+        line = bytearray()
+        for x in range(WIDTH):
+            red, green, blue, alpha = logical_pixel(x, y, variant)
+            line.extend(bytes((blue, green, red, alpha)) * SCALE)
+        rows.append(bytes(line) * SCALE)
+    return b"".join(rows)
+
+
+def check_capture(capture: bytes, variant: int) -> dict:
+    """Exact 1280x720 BGRA pixels; honor TGA top/bottom row-order bit."""
+    expected = expected_pixels(variant)
+    size_ok = len(capture) == TGA_BYTES
+    header_ok = (
+        size_ok and capture[0:12] == bytes(12)[:2] + b"\x02" + bytes(9)
+        and capture[12:16] == struct.pack("<HH", TGA_W, TGA_H)
+        and capture[16] == 32 and capture[17] in (0x28, 0x08)
+    )
+    pixels_ok = False
+    if header_ok:
+        actual = capture[18:]
+        if capture[17] == 0x08:
+            stride = TGA_W * 4
+            actual = b"".join(actual[i:i + stride]
+                              for i in range(len(actual) - stride, -1, -stride))
+        pixels_ok = actual == expected
+    return {
+        "capture_present": bool(capture),
+        "capture_bytes": len(capture),
+        "capture_sha256": hashlib.sha256(capture).hexdigest() if capture else None,
+        "original_tga_header_match": bool(header_ok),
+        "every_original_pixel_match": bool(pixels_ok),
+    }
+
+
+def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dict:
+    work = root / f"variant-{variant}"
+    work.mkdir()
+    guest = work / "guest"
+    guest.mkdir()
+    parts = compile_frame_segments("aarch64-linux-gnu-", variant=variant)
+    main, npdm = build_frame_nso(parts), build_extended_npdm()
+    verify_frame_fixture(main, npdm, variant)
+    (guest / "main").write_bytes(main)
+    (guest / "main.npdm").write_bytes(npdm)
+    cfg = work / "config.ini"
+    cfg.write_text("[Renderer]\nbackend=1\nbackend\\default=false\n"
+                   "vulkan_device=0\nvulkan_device\\default=false\n")
+    captures = work / "captures"
+    captures.mkdir()
+    home = work / "home"
+    for dir in ("config", "data", "cache", "runtime"):
+        (home / dir).mkdir(parents=True, exist_ok=True)
+    (home / "runtime").chmod(0o700)
+    env = {k: v for k, v in os.environ.items()
+           if k in ("PATH", "LANG", "LC_ALL", "LD_LIBRARY_PATH")}
+    env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / "config"),
+               XDG_DATA_HOME=str(home / "data"), XDG_CACHE_HOME=str(home / "cache"),
+               XDG_RUNTIME_DIR=str(home / "runtime"), SDL_VIDEODRIVER="x11",
+               SDL_AUDIODRIVER="dummy", VK_DRIVER_FILES=str(icd),
+               EDEN_NX2_FRAME_CAPTURE=str(captures), EDEN_NX2_HIDE_WINDOW="0")
+    logfile = work / "raw-runtime.log"  # ephemeral only: never in the output receipt/artifact
+    command = ["xvfb-run", "-a", "-e", str(work / "xvfb.log"),
+               "-s", "-screen 0 1280x720x24 -nolisten tcp",
+               "timeout", "--signal=TERM", "--kill-after=4s", f"{seconds}s",
+               str(cli), "--config", str(cfg), "--singlecore",
+               "--game", str(guest / "main")]
+    begin = time.monotonic()
+    with logfile.open("wb") as output:
+        proc = subprocess.Popen(command, cwd=work, env=env, stdout=output,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            rc = proc.wait(timeout=seconds + 12)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            rc = proc.wait()
+    elapsed = round(time.monotonic() - begin, 3)
+    if logfile.stat().st_size > MAX_LOG:
+        raise ValueError("Graphics host log exceeded maximum inspection size")
+    raw = logfile.read_bytes()
+    cap_files = tuple(captures.glob("nx2-frame-*.tga"))
+    if len(cap_files) > 4 or any(f.is_symlink() or not f.is_file() or
+                                f.stat().st_size > TGA_BYTES for f in cap_files):
+        raise ValueError("Invalid bounded original capture set")
+    expected_name = captures / "nx2-frame-00001.tga"
+    captured = expected_name.read_bytes() if len(cap_files) == 1 and
+    expected_name in cap_files else b""
+    pixel = check_capture(captured, variant)
+    markers = {name: raw.count(f"NX2_FRAME_{name}\n".encode())
+               for name in ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE")}
+    passed = rc == 0 and pixel["every_original_pixel_match"] and all(
+        count == 1 for count in markers.values())
+    return {
+        "variant": variant,
+        "source_authored_main_sha256": hashlib.sha256(main).hexdigest(),
+        "source_authored_npdm_sha256": hashlib.sha256(npdm).hexdigest(),
+        "natural_exit": rc == 0, "process_rc": rc, "elapsed_seconds": elapsed,
+        "original_guest_markers": markers, "capture_count": len(cap_files),
+        "capture": pixel, "lifecycle": lifecycle(raw),
+        "all_graphics_controls_passed": bool(passed),
+    }
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("candidate", choices=("eglantine", "lichii"))
+    p.add_argument("checkout", type=Path)
+    p.add_argument("build", type=Path)
+    p.add_argument("--output", required=True, type=Path)
+    p.add_argument("--seconds", type=int, default=30)
+    a = p.parse_args()
+    try:
+        if not 5 <= a.seconds <= 60 or a.output.exists():
+            raise ValueError("Require bounded execution and a fresh receipt")
+        if a.output.resolve().is_relative_to(a.checkout.resolve()):
+            raise ValueError("Receipt must not modify engine source")
+        source = verify_applied(a.checkout, a.candidate)
+        cli, sha = built_cli(a.checkout, a.build)
+        manifests = tuple(sorted(Path("/usr/share/vulkan/icd.d").glob("lvp_icd*.json")))
+        if len(manifests) != 1:
+            raise ValueError("Require exactly one Mesa Lavapipe Vulkan ICD")
+        with tempfile.TemporaryDirectory(prefix="nx2-modern-original-graphics-") as temp:
+            root = Path(temp)
+            records = [run_one(cli, variant, root, manifests[0], a.seconds)
+                       for variant in (0, 1)]
+        if verify_applied(a.checkout, a.candidate) != source:
+            raise ValueError("Engine source changed during graphics experiment")
+        different = records[0]["capture"]["capture_sha256"] != records[1]["capture"]["capture_sha256"]
+        success = all(r["all_graphics_controls_passed"] for r in records) and different
+        receipt = {
+            "kind": "nx2-original-modern-cpu-image-v1",
+            "candidate": a.candidate, "revision": source["commit"],
+            "approved_exit_adapter": True, "source_built_cli_sha256": sha,
+            "software_vulkan_icd": manifests[0].name,
+            "two_variants_produce_different_captures": bool(different),
+            "original_graphics_pass": bool(success),
+            "loader_negative_control_qualified": False,
+            "game_compatibility_qualified": False,
+            "raw_runtime_logs_retained": False,
+            "trials": records,
+        }
+        a.output.parent.mkdir(parents=True, exist_ok=True)
+        a.output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+        print("NX2_MODERN_ORIGINAL_CPU_IMAGE=" +
+              ("PASS" if success else "NOT_VERIFIED") + " candidate=" + a.candidate)
+        return 0 if success else 1
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        print("NX2_MODERN_ORIGINAL_CPU_IMAGE_UNAVAILABLE: " + str(e), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
