@@ -328,5 +328,31 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
 
 
 
+    def test_modern_gpu_address_space_mapping_is_explicit_and_original(self):
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        args = dict(variant=0, copy_tipc_handles=True, observe_invalid_size=True,
+                    modern_direct_vi2=True)
+        previous = compile_frame_segments(prefix, **args)
+        mapped = compile_frame_segments(prefix, **args, modern_gpu_image_map=True)
+        self.assertNotEqual(mapped[0], previous[0])
+        self.assertEqual(mapped[1], previous[1])
+        self.assertNotEqual(mapped[2], previous[2])  # only ephemeral mapping state
+        verify_frame_fixture(build_frame_nso(mapped), build_extended_npdm(), 0)
+        self.assertEqual(mapped, compile_frame_segments(
+            prefix, **args, modern_gpu_image_map=True))
+
+    def test_image_mapping_requires_modern_cpu_guest_and_boolean_mode(self):
+        for flags in (dict(modern_gpu_image_map=1),
+                      dict(modern_gpu_image_map=True),
+                      dict(modern_gpu_image_map=True, modern_direct_vi2=True),
+                      dict(modern_gpu_image_map=True, copy_tipc_handles=True,
+                           modern_direct_vi2=True, gpu=True)):
+            with self.subTest(flags=flags), self.assertRaisesRegex(
+                ValueError, "modern_gpu_image_map must be boolean|modern GPU mapping requires"
+            ):
+                compile_frame_segments(**flags)
+
+
+
 if __name__ == "__main__":
     unittest.main()

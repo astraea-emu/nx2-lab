@@ -33,6 +33,19 @@
 .if (NX2_FRAME_MODERN_DIRECT_VI2 != 0) && (NX2_FRAME_MODERN_DIRECT_VI2 != 1)
     .error "NX2_FRAME_MODERN_DIRECT_VI2 must be 0 or 1"
 .endif
+/* Explicit modern-only positive graphics: register the original CPU image
+ * through the NX2 GPU service and an initialized nvhost GPU address space.
+ * Frozen Eden's authored guest and every strict negative remain unchanged.
+ */
+.ifndef NX2_FRAME_MODERN_GPU_IMAGE_MAP
+    .set NX2_FRAME_MODERN_GPU_IMAGE_MAP, 0
+.endif
+.if (NX2_FRAME_MODERN_GPU_IMAGE_MAP != 0) && (NX2_FRAME_MODERN_GPU_IMAGE_MAP != 1)
+    .error "NX2_FRAME_MODERN_GPU_IMAGE_MAP must be 0 or 1"
+.endif
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP && (!NX2_FRAME_MODERN_DIRECT_VI2 || !NX2_FRAME_TIPC_COPY_HANDLES)
+    .error "Modern GPU image mapping requires modern copied handles and direct VI2"
+.endif
 .if (NX2_FRAME_VARIANT != 0) && (NX2_FRAME_VARIANT != 1)
     .error "NX2_FRAME_VARIANT must be 0 or 1"
 .endif
@@ -407,6 +420,25 @@ field_names:
     str w0, [x22, #F_fail_step]
 .Lskip\@:
 .endm
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP
+/* NVIDIA CMIF buffer descriptor, copied from our original GPU guest.
+ * x0 points into the real TLS request; the other object stays in guest RAM. */
+.macro modern_gpu_descriptor offset, label, count
+    add x0, x21, #\offset
+    address x1, \label
+    mov w2, #\count
+    str w2, [x0]
+    str w1, [x0, #4]
+    lsr x3, x1, #32
+    and w3, w3, #15
+    lsl w3, w3, #28
+    lsr x4, x1, #36
+    and w4, w4, #7
+    orr w3, w3, w4, lsl #2
+    str w3, [x0, #8]
+.endm
+.endif
+
 _start:
     mrs x21, tpidrro_el0
     address x22, record
@@ -518,6 +550,34 @@ _start:
     str x0, [x21, #12]
     send 5, memory_bind
     tipc_check memory_bind, 114
+
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP
+    /* The GPU service's register-memory command alone cannot create a device
+     * mapping. NVDRV AllocAsEx first establishes the nvhost-as-gpu listener. */
+    bl modern_gpu_open_as
+    cbnz w0, failure
+    /* GSV TIPC 497 returns a *copied* GPU session; reuse temporary slot 7,
+     * which is freed before opening the permanent VI2 handle at step 25. */
+    moved modern_gpu_session_request, open_vi2, 497, 7, vi2_handle
+    prepare modern_gpu_register_image_request
+    address x0, image_buffer
+    str x0, [x21, #8]
+    add x0, x0, #8191
+    str x0, [x21, #16]
+    ldr w0, [x19, #28]
+    svc #0x21
+    tipc_capture memory_create
+    tipc_check memory_create, 101, 0, 2
+    ldr w4, [x21, #12]
+    cbz w4, failure
+    cmn w4, #1
+    b.eq failure
+    ldr w0, [x19, #28]
+    svc #0x16
+    cbnz w0, failure
+    str wzr, [x19, #28]
+    emit modern_gpu_registered
+.endif
     step 22
     prepare image_create_request
     patch_id memory_id, 76
@@ -643,7 +703,108 @@ _start:
     str wzr, [x22, #F_fail_step]
     b cleanup
 
-/* CPU-produced pattern: 2x2 checker, with four asymmetric 2x2 corners.
+
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP
+/* Original NVDRV Open("/dev/nvhost-as-gpu") + ioctl AllocAsEx.
+ * This is guest IPC, not an emulator-side device-memory shortcut.
+ * A successful ioctl activates the source's Nx2GpuMemoryRegistry listener.
+ */
+modern_gpu_open_as:
+    stp x29, x30, [sp, #-16]!
+    prepare modern_as_open_request
+    modern_gpu_descriptor 8, modern_as_name, (modern_as_name_end - modern_as_name)
+    ldr w0, [x19, #24]
+    svc #0x21
+    cbnz w0, .Lmodern_as_open_failure
+    ldp w1, w2, [x21]
+    cbnz w1, .Lmodern_as_open_failure
+    cmp w2, #14
+    b.ne .Lmodern_as_open_failure
+    ldr w3, [x21, #16]
+    mov w4, #0x4653
+    movk w4, #0x4f43, lsl #16
+    cmp w3, w4
+    b.ne .Lmodern_as_open_failure
+    ldr w5, [x21, #36]
+    cbnz w5, .Lmodern_as_open_failure
+    ldr w6, [x21, #32]
+    tbnz w6, #31, .Lmodern_as_open_failure
+    address x9, modern_as_fd
+    str w6, [x9]
+    emit modern_as_opened
+
+    prepare modern_as_ioctl_request
+    modern_gpu_descriptor 8, modern_as_init_data, 40
+    modern_gpu_descriptor 20, modern_as_ioctl_output, 40
+    address x9, modern_as_fd
+    ldr w10, [x9]
+    str w10, [x21, #48]
+    mov w10, #0x4109
+    movk w10, #0x4028, lsl #16
+    str w10, [x21, #52]
+    ldr w0, [x19, #24]
+    svc #0x21
+    cbnz w0, .Lmodern_as_open_failure
+    ldp w1, w2, [x21]
+    cbnz w1, .Lmodern_as_open_failure
+    cmp w2, #12
+    b.ne .Lmodern_as_open_failure
+    ldr w3, [x21, #16]
+    mov w4, #0x4653
+    movk w4, #0x4f43, lsl #16
+    cmp w3, w4
+    b.ne .Lmodern_as_open_failure
+    ldr w3, [x21, #32]
+    cbnz w3, .Lmodern_as_open_failure
+    emit modern_as_initialized
+    mov w0, #0
+    ldp x29, x30, [sp], #16
+    ret
+.Lmodern_as_open_failure:
+    mov w0, #1
+    ldp x29, x30, [sp], #16
+    ret
+
+/* Call before the NVDRV kernel session is closed, after native image teardown.
+ * The real CMIF Close(fd) must succeed; never silently discard an open FD. */
+modern_gpu_close_as:
+    stp x29, x30, [sp, #-16]!
+    address x9, modern_as_fd
+    ldr w10, [x9]
+    tbnz w10, #31, .Lmodern_as_close_success
+    prepare modern_as_close_request
+    address x9, modern_as_fd
+    ldr w10, [x9]
+    str w10, [x21, #32]
+    ldr w0, [x19, #24]
+    svc #0x21
+    cbnz w0, .Lmodern_as_close_failure
+    ldp w1, w2, [x21]
+    cbnz w1, .Lmodern_as_close_failure
+    cmp w2, #12
+    b.ne .Lmodern_as_close_failure
+    ldr w3, [x21, #16]
+    mov w4, #0x4653
+    movk w4, #0x4f43, lsl #16
+    cmp w3, w4
+    b.ne .Lmodern_as_close_failure
+    ldr w3, [x21, #32]
+    cbnz w3, .Lmodern_as_close_failure
+    address x9, modern_as_fd
+    mov w10, #-1
+    str w10, [x9]
+    emit modern_as_closed
+.Lmodern_as_close_success:
+    mov w0, #0
+    ldp x29, x30, [sp], #16
+    ret
+.Lmodern_as_close_failure:
+    mov w0, #1
+    ldp x29, x30, [sp], #16
+    ret
+.endif
+
+/* CPU-produced pattern: 2x2 checker: with four asymmetric 2x2 corners.
  * Native 16x9 GOB addressing swaps offset bits 5/6 relative to legacy tiling.
  * Nothing writes this backing after draw_image returns.
  */
@@ -768,6 +929,15 @@ cleanup:
     release image_destroy_request, 5, image_destroy, 430, 2, 38, image_id
     release memory_destroy_request, 5, memory_destroy, 112, 1, 39, memory_id
     release display_finalize_request, 5, display_finalize, 303, 0, 40
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP
+    bl modern_gpu_close_as
+    cbz w0, .Lmodern_closed
+    ldr w1, [x22, #F_fail_step]
+    cbnz w1, .Lmodern_closed
+    mov w1, #41
+    str w1, [x22, #F_fail_step]
+.Lmodern_closed:
+.endif
     mov x23, #7
     add x24, x22, #F_close_vi2
     mov w25, #41
@@ -1043,6 +1213,46 @@ complete_message_end:
 failure_message:
     .ascii "NX2_FRAME_FAILURE\n"
 failure_message_end:
+
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP
+/* Private original input templates, not part of the 35 frozen Eden fixtures. */
+modern_as_open_request:
+    .word 0x00100004, 8, 0, 0, 0, 0, 0, 0
+    .word 0x49434653, 0, 0, 0
+    .zero 128 - (. - modern_as_open_request)
+modern_as_ioctl_request:
+    .word 0x01100004, 10, 0, 0, 0, 0, 0, 0
+    .word 0x49434653, 0, 1, 0, 0, 0
+    .zero 128 - (. - modern_as_ioctl_request)
+modern_as_close_request:
+    .word 4, 9, 0, 0, 0x49434653, 0, 2, 0, 0
+    .zero 128 - (. - modern_as_close_request)
+modern_gpu_session_request:
+    .word 0x201, 2, 0x00020000, 3
+    .zero 128 - (. - modern_gpu_session_request)
+modern_gpu_register_image_request:
+    .word 0x75, 4, 0, 0, 0, 0
+    .zero 128 - (. - modern_gpu_register_image_request)
+modern_as_name:
+    .asciz "/dev/nvhost-as-gpu"
+modern_as_name_end:
+modern_as_init_data:
+    .word 0, 0, 0x20000, 0
+    .quad 0, 0, 0
+modern_as_opened_message:
+    .ascii "NX2_FRAME_MODERN_AS_OPENED\n"
+modern_as_opened_message_end:
+modern_as_initialized_message:
+    .ascii "NX2_FRAME_MODERN_AS_INITIALIZED\n"
+modern_as_initialized_message_end:
+modern_gpu_registered_message:
+    .ascii "NX2_FRAME_MODERN_IMAGE_REGISTERED\n"
+modern_gpu_registered_message_end:
+modern_as_closed_message:
+    .ascii "NX2_FRAME_MODERN_AS_CLOSED\n"
+modern_as_closed_message_end:
+.endif
+
 .section .data, "aw"
 .balign 16
 .global record, live_handles, notification_buffer, notification_guard_before
@@ -1066,4 +1276,11 @@ line_buffer:
 .balign 4096
 image_buffer:
     .zero 8192
+.if NX2_FRAME_MODERN_GPU_IMAGE_MAP
+.balign 16
+modern_as_fd:
+    .word -1
+modern_as_ioctl_output:
+    .zero 40
+.endif
 .section .note.GNU-stack, "", @progbits

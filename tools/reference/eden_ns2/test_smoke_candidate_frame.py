@@ -119,5 +119,13 @@ class ModernOriginalPixelsTests(unittest.TestCase):
 
 
 
+    def test_modern_image_map_stage_is_distinct_from_cleanup_release(self):
+        self.assertEqual(original_guest_failure_step(
+            b"NX2_FRAME fail_step=00000029\n")["stage"], "gpu_address_space_close")
+        self.assertFalse(original_guest_failure_step(
+            b"NX2_FRAME fail_step=0000002a\n")["step_observed_once"])
+
+
+
 if __name__ == "__main__":
     unittest.main()

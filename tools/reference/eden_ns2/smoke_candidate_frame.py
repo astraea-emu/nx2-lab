@@ -89,13 +89,14 @@ def original_guest_failure_step(raw: bytes) -> dict:
     step = int(seen[0], 16)
     # Original cleanup release checks are numbered 34..40; do not conflate
     # those authored failures with invalid/corrupted record values.
-    if not 0 <= step <= 40:
+    if not 0 <= step <= 41:
         return {"step_observed_once": False, "step": None,
                 "stage": "out_of_contract"}
     stage = ("completed" if step == 0 else "setup" if step <= 19 else
              "resource_registration" if step <= 29 else
              "present" if step == 30 else
-             "retirement" if step <= 33 else "cleanup_release")
+             "retirement" if step <= 33 else
+             "gpu_address_space_close" if step == 41 else "cleanup_release")
     return {"step_observed_once": True, "step": step, "stage": stage}
 
 
@@ -148,7 +149,7 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
     # Eglantine/Lichii return copied GSV session handles, unlike frozen Eden.
     parts = compile_frame_segments("aarch64-linux-gnu-", variant=variant,
                                    copy_tipc_handles=True, observe_invalid_size=True,
-                                   modern_direct_vi2=True)
+                                   modern_direct_vi2=True, modern_gpu_image_map=True)
     main, npdm = build_frame_nso(parts), build_extended_npdm()
     verify_frame_fixture(main, npdm, variant)
     (guest / "main").write_bytes(main)
@@ -197,7 +198,9 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
                 expected_name in cap_files else b"")
     pixel = check_capture(captured, variant)
     markers = {name: raw.count(f"NX2_FRAME_{name}\n".encode())
-               for name in ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE")}
+               for name in ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE",
+                            "MODERN_AS_OPENED", "MODERN_AS_INITIALIZED",
+                            "MODERN_IMAGE_REGISTERED", "MODERN_AS_CLOSED")}
     positive = rc == 0 and pixel["every_original_pixel_match"] and all(
         count == 1 for count in markers.values())
     size_observation = original_invalid_size_observation(raw)
@@ -251,6 +254,7 @@ def main() -> int:
             "original_guest_tipc_copy_handle_adapter": True,
             "invalid_image_size_input_preserved_as_observation": True,
             "modern_direct_vi2_positive_adapter": True,
+            "source_authored_modern_gpu_image_map": True,
             "legacy_vi2_registration_and_notifications_omitted": True,
             "source_built_cli_sha256": sha,
             "software_vulkan_icd": manifests[0].name,
