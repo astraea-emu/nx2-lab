@@ -185,7 +185,14 @@ def fault_signatures(lines: list[str], source_root: Path | None = None) -> dict:
         public = source_root / "src"
         source = public / relative
         if (".." in relative.parts or source.is_symlink() or not source.is_file()
-                or not source.resolve().is_relative_to(public.resolve())):
+                or not source.resolve().is_relative_to(public.resolve())
+                or source.stat().st_size > 2_000_000):
+            continue
+        # A public source filename is not an attributable site unless its
+        # recorded line also exists in the exact pinned checkout.
+        with source.open("rb") as stream:
+            source_lines = sum(1 for _ in stream)
+        if int(origin["line"]) > source_lines:
             continue
         site = relative.as_posix() + ":" + origin["line"]
         sites[site] = min(sites.get(site, 0) + 1, 100000)
