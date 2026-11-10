@@ -6,6 +6,7 @@ import unittest
 
 from smoke_candidate_frame import (
     HEIGHT, SCALE, TGA_H, TGA_W, WIDTH, check_capture, expected_pixels,
+    original_guest_failure_step,
 )
 
 
@@ -54,6 +55,24 @@ class ModernOriginalPixelsTests(unittest.TestCase):
     def test_only_two_original_variants_permitted(self):
         with self.assertRaises(ValueError):
             expected_pixels(2)
+
+    def test_guest_stage_diagnostic_is_bounded_and_redacted(self):
+        report = original_guest_failure_step(
+            b"private-path NX2_FRAME fail_step=00000013 private-key\n")
+        self.assertEqual(report, {"step_observed_once": True, "step": 19,
+                                  "stage": "setup"})
+        self.assertNotIn("private", str(report))
+        self.assertEqual(original_guest_failure_step(
+            b"NX2_FRAME fail_step=0000001e")["stage"], "present")
+        self.assertEqual(original_guest_failure_step(
+            b"NX2_FRAME fail_step=00000000")["stage"], "completed")
+
+    def test_missing_duplicated_or_out_of_contract_stage_rejected(self):
+        for raw in (b"", b"NX2_FRAME fail_step=00000022",
+                    b"NX2_FRAME fail_step=00000001\n"
+                    b"NX2_FRAME fail_step=00000002"):
+            with self.subTest(raw=raw):
+                self.assertFalse(original_guest_failure_step(raw)["step_observed_once"])
 
 
 if __name__ == "__main__":

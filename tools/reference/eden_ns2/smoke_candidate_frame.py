@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import struct
 import subprocess
@@ -73,6 +74,26 @@ def check_capture(capture: bytes, variant: int) -> dict:
         "original_tga_header_match": bool(header_ok),
         "every_original_pixel_match": bool(pixels_ok),
     }
+
+
+
+FAIL_STEP = re.compile(rb"NX2_FRAME fail_step=([0-9a-f]{8})")
+
+
+def original_guest_failure_step(raw: bytes) -> dict:
+    """Extract one authored failure-stage integer, never diagnostic log text."""
+    seen = FAIL_STEP.findall(raw)
+    if len(seen) != 1:
+        return {"step_observed_once": False, "step": None,
+                "stage": "unclassified"}
+    step = int(seen[0], 16)
+    if not 0 <= step <= 33:
+        return {"step_observed_once": False, "step": None,
+                "stage": "out_of_contract"}
+    stage = ("completed" if step == 0 else "setup" if step <= 19 else
+             "resource_registration" if step <= 29 else
+             "present" if step == 30 else "retirement")
+    return {"step_observed_once": True, "step": step, "stage": stage}
 
 
 def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dict:
@@ -137,7 +158,9 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
         "source_authored_main_sha256": hashlib.sha256(main).hexdigest(),
         "source_authored_npdm_sha256": hashlib.sha256(npdm).hexdigest(),
         "natural_exit": rc == 0, "process_rc": rc, "elapsed_seconds": elapsed,
-        "original_guest_markers": markers, "capture_count": len(cap_files),
+        "original_guest_markers": markers,
+        "original_guest_failure_stage": original_guest_failure_step(raw),
+        "capture_count": len(cap_files),
         "capture": pixel, "lifecycle": lifecycle(raw),
         "all_graphics_controls_passed": bool(passed),
     }
