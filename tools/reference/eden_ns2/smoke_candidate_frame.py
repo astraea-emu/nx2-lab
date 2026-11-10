@@ -125,8 +125,8 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
                                 f.stat().st_size > TGA_BYTES for f in cap_files):
         raise ValueError("Invalid bounded original capture set")
     expected_name = captures / "nx2-frame-00001.tga"
-    captured = expected_name.read_bytes() if len(cap_files) == 1 and
-    expected_name in cap_files else b""
+    captured = (expected_name.read_bytes() if len(cap_files) == 1 and
+                expected_name in cap_files else b"")
     pixel = check_capture(captured, variant)
     markers = {name: raw.count(f"NX2_FRAME_{name}\n".encode())
                for name in ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE")}
