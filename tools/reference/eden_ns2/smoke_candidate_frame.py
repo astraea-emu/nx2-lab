@@ -130,7 +130,8 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
     guest.mkdir()
     # Eglantine/Lichii return copied GSV session handles, unlike frozen Eden.
     parts = compile_frame_segments("aarch64-linux-gnu-", variant=variant,
-                                   copy_tipc_handles=True, observe_invalid_size=True)
+                                   copy_tipc_handles=True, observe_invalid_size=True,
+                                   modern_direct_vi2=True)
     main, npdm = build_frame_nso(parts), build_extended_npdm()
     verify_frame_fixture(main, npdm, variant)
     (guest / "main").write_bytes(main)
@@ -231,12 +232,15 @@ def main() -> int:
             "approved_exit_adapter": True,
             "original_guest_tipc_copy_handle_adapter": True,
             "invalid_image_size_input_preserved_as_observation": True,
+            "modern_direct_vi2_positive_adapter": True,
+            "legacy_vi2_registration_and_notifications_omitted": True,
             "source_built_cli_sha256": sha,
             "software_vulkan_icd": manifests[0].name,
             "two_variants_produce_different_captures": bool(different),
             "original_positive_graphics_pass": bool(success),
-            "full_original_native_frame_contract_qualified": bool(
-                success and all(r["full_original_contract_passed"] for r in records)),
+            # The positive-only modern guest does not execute legacy VI2
+            # registration/notification negatives, regardless of size result.
+            "full_original_native_frame_contract_qualified": False,
             "loader_negative_control_qualified": False,
             "game_compatibility_qualified": False,
             "raw_runtime_logs_retained": False,

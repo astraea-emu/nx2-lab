@@ -292,6 +292,21 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "observe_invalid_size must be boolean"):
             compile_frame_segments(observe_invalid_size=1)
 
+    def test_modern_direct_vi2_only_changes_original_instructions(self):
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        first = compile_frame_segments(
+            prefix, variant=0, copy_tipc_handles=True, observe_invalid_size=True)
+        direct = compile_frame_segments(
+            prefix, variant=0, copy_tipc_handles=True, observe_invalid_size=True,
+            modern_direct_vi2=True)
+        self.assertNotEqual(first[0], direct[0])
+        self.assertEqual(first[1:], direct[1:])
+        verify_frame_fixture(build_frame_nso(direct), build_extended_npdm(), 0)
+
+    def test_modern_direct_vi2_requires_boolean_flag(self):
+        with self.assertRaisesRegex(ValueError, "modern_direct_vi2 must be boolean"):
+            compile_frame_segments(modern_direct_vi2=1)
+
 
 if __name__ == "__main__":
     unittest.main()

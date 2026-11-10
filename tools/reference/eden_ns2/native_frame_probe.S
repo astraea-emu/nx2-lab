@@ -25,6 +25,14 @@
 .if (NX2_FRAME_OBSERVE_INVALID_SIZE != 0) && (NX2_FRAME_OBSERVE_INVALID_SIZE != 1)
     .error "NX2_FRAME_OBSERVE_INVALID_SIZE must be 0 or 1"
 .endif
+/* Modern VI2 directly presents images; legacy register/open/bind commands and
+ * notifications are not implemented there. Preserve the strict default guest. */
+.ifndef NX2_FRAME_MODERN_DIRECT_VI2
+    .set NX2_FRAME_MODERN_DIRECT_VI2, 0
+.endif
+.if (NX2_FRAME_MODERN_DIRECT_VI2 != 0) && (NX2_FRAME_MODERN_DIRECT_VI2 != 1)
+    .error "NX2_FRAME_MODERN_DIRECT_VI2 must be 0 or 1"
+.endif
 .if (NX2_FRAME_VARIANT != 0) && (NX2_FRAME_VARIANT != 1)
     .error "NX2_FRAME_VARIANT must be 0 or 1"
 .endif
@@ -529,6 +537,10 @@ _start:
     orr x20, x20, #1
     step 25
     moved open_vi2_request, open_vi2, 305, 7, vi2_handle
+/* The pinned modern VI2 service handles 212/229 directly. The legacy
+ * 201 registration command is absent; 101/251 are legacy stubs. Do not
+ * create their cleanup flags if we never made those requests. */
+.if !NX2_FRAME_MODERN_DIRECT_VI2
     step 26
     tipc_call register_request, 7, register, 201
     orr x20, x20, #(1 << 4)
@@ -538,6 +550,7 @@ _start:
     step 28
     tipc_call bind_display_request, 7, bind_display, 251
     orr x20, x20, #(1 << 6)
+.endif
     step 29
     prepare availability_request
     send 7, available_before
@@ -610,10 +623,14 @@ _start:
     subs w23, w23, #1
     b.ne .Lhold
     check_u64 poll, 0x7fff
+/* Modern VI2 has no legacy TIPC 21 release/clear notification request.
+ * The host's saved capture and all rendered pixels remain independent gates. */
+.if !NX2_FRAME_MODERN_DIRECT_VI2
     step 32
     notification_call released, 128, 0, 8, 0
     step 33
     notification_call clear, 128, 0, 0, 0
+.endif
     str wzr, [x22, #F_fail_step]
     b cleanup
 

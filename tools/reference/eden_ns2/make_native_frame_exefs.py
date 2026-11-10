@@ -41,7 +41,7 @@ MARKERS = tuple(f"NX2_FRAME_{name}\n".encode() for name in (
 def compile_frame_segments(
     tool_prefix: str = "aarch64-linux-gnu-", *, variant: int = 0,
     gpu: bool = False, clear_only: bool = False, copy_tipc_handles: bool = False,
-    observe_invalid_size: bool = False,
+    observe_invalid_size: bool = False, modern_direct_vi2: bool = False,
 ) -> tuple[bytes, bytes, bytes]:
     """Link original ARM64 code and validate its three bounded PT_LOAD segments."""
     if variant not in (0, 1):
@@ -52,6 +52,8 @@ def compile_frame_segments(
         raise ValueError("copy_tipc_handles must be boolean")
     if type(observe_invalid_size) is not bool:
         raise ValueError("observe_invalid_size must be boolean")
+    if type(modern_direct_vi2) is not bool:
+        raise ValueError("modern_direct_vi2 must be boolean")
     addresses, sizes = ((GPU_SEGMENT_ADDRESSES, GPU_SEGMENT_SIZES) if gpu else
                         (SEGMENT_ADDRESSES, SEGMENT_SIZES))
     with tempfile.TemporaryDirectory(prefix="nx2-frame-guest-") as temporary:
@@ -69,6 +71,8 @@ def compile_frame_segments(
             arguments.extend(("--defsym", "NX2_FRAME_TIPC_COPY_HANDLES=1"))
         if observe_invalid_size:
             arguments.extend(("--defsym", "NX2_FRAME_OBSERVE_INVALID_SIZE=1"))
+        if modern_direct_vi2:
+            arguments.extend(("--defsym", "NX2_FRAME_MODERN_DIRECT_VI2=1"))
         subprocess.run([tool_prefix + "as", "--defsym", f"NX2_FRAME_VARIANT={variant}",
                         *arguments, "-o", str(obj), str(ROOT / (source + ".S"))], check=True)
         subprocess.run([tool_prefix + "ld", "--build-id=none", "-T",
