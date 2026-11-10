@@ -9,6 +9,7 @@ from smoke_candidate_frame import (
     original_guest_failure_step, original_invalid_size_observation,
     original_graphics_device_mapping_observation,
     original_pixel_difference, original_finalize_observation,
+    original_exact_pixel_renderer_config,
 )
 
 
@@ -185,6 +186,16 @@ class ModernOriginalPixelsTests(unittest.TestCase):
         self.assertFalse(original_finalize_observation(valid + valid)["fields_observed_once"])
         self.assertFalse(original_finalize_observation(b"")["fields_observed_once"])
 
+
+
+    def test_exact_pixel_renderer_disables_both_default_postprocesses(self):
+        cfg = original_exact_pixel_renderer_config()
+        self.assertTrue(cfg.startswith("[Renderer]\n"))
+        for key in ("backend", "vulkan_device", "scaling_filter", "anti_aliasing"):
+            self.assertEqual(cfg.count(f"\n{key}="), 1)
+            self.assertEqual(cfg.count(f"\n{key}\\default=false"), 1)
+        self.assertIn("\nscaling_filter=0\n", cfg)
+        self.assertIn("\nanti_aliasing=0\n", cfg)
 
 
 if __name__ == "__main__":

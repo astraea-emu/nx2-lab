@@ -222,6 +222,23 @@ def original_finalize_observation(raw: bytes) -> dict:
     }
 
 
+
+def original_exact_pixel_renderer_config() -> str:
+    """Request a non-filtered screenshot; never change original image or oracle.
+
+    Pinned Eglantine/Lichii use ScaleForce and FXAA defaults; screenshot
+    blit_capture uses PresentFiltersForDisplay. The enum's first entries
+    are NearestNeighbor and None (both 0), and the INI reader requires
+    each setting's \default=false to override those defaults.
+    """
+    return (
+        "[Renderer]\n"
+        "backend=1\nbackend\\default=false\n"
+        "vulkan_device=0\nvulkan_device\\default=false\n"
+        "scaling_filter=0\nscaling_filter\\default=false\n"
+        "anti_aliasing=0\nanti_aliasing\\default=false\n"
+    )
+
 def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dict:
     work = root / f"variant-{variant}"
     work.mkdir()
@@ -236,8 +253,7 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
     (guest / "main").write_bytes(main)
     (guest / "main.npdm").write_bytes(npdm)
     cfg = work / "config.ini"
-    cfg.write_text("[Renderer]\nbackend=1\nbackend\\default=false\n"
-                   "vulkan_device=0\nvulkan_device\\default=false\n")
+    cfg.write_text(original_exact_pixel_renderer_config())
     captures = work / "captures"
     captures.mkdir()
     home = work / "home"
@@ -342,6 +358,7 @@ def main() -> int:
             "legacy_vi2_registration_and_notifications_omitted": True,
             "source_built_cli_sha256": sha,
             "software_vulkan_icd": manifests[0].name,
+            "renderer_nearest_no_aa_requested": True,
             "two_variants_produce_different_captures": bool(different),
             "original_positive_graphics_pass": bool(success),
             # The positive-only modern guest does not execute legacy VI2
