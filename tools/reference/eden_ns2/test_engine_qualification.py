@@ -139,6 +139,48 @@ class SmokeTests(unittest.TestCase):
         self.assertNotIn("private", str(report))
         self.assertNotIn("secret", str(report))
 
+    def test_soft_assert_source_site_from_exact_public_checkout_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "src/core/guest.cpp"
+            source.parent.mkdir(parents=True)
+            source.write_text("// SPDX-License-Identifier: GPL-3.0-or-later\\n")
+            raw = ("[ 0.0123] Debug <Critical> core/guest.cpp:1:Run: "
+                   "/private/build/src/core/guest.cpp: assert "
+                   "private-assertion-argument\\n")
+            report = fault_signatures(raw.splitlines(), root)
+            self.assertEqual(report["source_stages"]["host_debug"], 1)
+            self.assertEqual(report["categories"]["assertion"], 1)
+            self.assertEqual(report["reviewed_source_assert_sites"],
+                             [{"site": "core/guest.cpp:1", "count": 1}])
+            self.assertFalse(report["source_assert_site_count_truncated"])
+            self.assertNotIn("private", str(report))
+            self.assertNotIn("argument", str(report))
+            # Attribution is for debugging; a matching source site cannot
+            # certify a clean emulator execution or defeat strict assessment.
+            assessment = assess_silently(self.good + raw.encode(), self.bad, 0, 1,
+                                         root)
+            self.assertFalse(assessment["original_controls_pass"])
+            self.assertEqual(assessment["first_stop"],
+                             "positive_execution_fault_signature_observed")
+
+    def test_fake_and_guest_supplied_fault_sources_remain_unattributed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # A made-up or absolute private file must never be exposed.
+            records = [
+                "Debug <Critical> /private/home/core/secret.cpp:1:Run: "
+                "assert private-key",
+                "Debug <Critical> core/missing.cpp:1:Run: assert private-key",
+                "Debug.Emulated <Info> core/guest.cpp:1:Run: "
+                "assert private-key",
+            ]
+            report = fault_signatures(records, root)
+            self.assertEqual(report["reviewed_source_assert_sites"], [])
+            self.assertNotIn("private", str(report))
+            self.assertNotIn("secret", str(report))
+            self.assertNotIn("key", str(report))
+
     def test_fault_signatures_remain_strict_runtime_rejection(self):
         positive_fault = self.good + (
             b"[ 1.0] Frontend <Error> file.cpp:1:Start: "
