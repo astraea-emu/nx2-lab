@@ -359,6 +359,21 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
                 compile_frame_segments(**flags)
 
 
+    def test_modern_gpu_characteristics_precede_address_space_installation(self):
+        # This is a source assertion; only the actual runtime receipt proves
+        # that the characteristics query succeeds on an upstream engine.
+        assembly = Path(__file__).with_name("native_frame_probe.S").read_text()
+        source = assembly.split("modern_gpu_open_as:", 1)[1].split(
+            ".Lmodern_as_open_failure:", 1)[0]
+        self.assertLess(source.index("modern_ctrl_ioctl3_request"),
+                        source.index("modern_as_ioctl_request"))
+        self.assertIn("modern_gpu_descriptor 32, modern_ctrl_characteristics_inline, 208", source)
+        self.assertIn("mov w10, #0x4705", source)
+        self.assertIn("movk w10, #0xc0b0, lsl #16", source)
+        self.assertIn("cmp w10, #0x170", source)
+        self.assertIn("cmp w10, #0x0e", source)
+        self.assertIn("modern_ctrl_closed_message:", assembly)
+
 
 if __name__ == "__main__":
     unittest.main()

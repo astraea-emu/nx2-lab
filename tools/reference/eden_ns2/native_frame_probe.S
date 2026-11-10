@@ -712,6 +712,75 @@ _start:
  */
 modern_gpu_open_as:
     stp x29, x30, [sp, #-16]!
+
+    /* The pinned Ampere GPU driver is activated by NvRm GPU
+     * characteristics Ioctl3 (0xd0-byte Switch 2 request), not by
+     * opening/initializing nvhost-as-gpu alone. Query the original
+     * /dev/nvhost-ctrl-gpu service before installing any AS mapping.
+     */
+    prepare modern_as_open_request
+    modern_gpu_descriptor 8, modern_ctrl_name, (modern_ctrl_name_end - modern_ctrl_name)
+    ldr w0, [x19, #24]
+    svc #0x21
+    cbnz w0, .Lmodern_as_open_failure
+    ldp w1, w2, [x21]
+    cbnz w1, .Lmodern_as_open_failure
+    cmp w2, #14
+    b.ne .Lmodern_as_open_failure
+    ldr w3, [x21, #16]
+    mov w4, #0x4653
+    movk w4, #0x4f43, lsl #16
+    cmp w3, w4
+    b.ne .Lmodern_as_open_failure
+    ldr w5, [x21, #36]
+    cbnz w5, .Lmodern_as_open_failure
+    ldr w6, [x21, #32]
+    tbnz w6, #31, .Lmodern_as_open_failure
+    address x9, modern_ctrl_fd
+    str w6, [x9]
+    address x9, modern_ctrl_opened_flag
+    mov w7, #1
+    str w7, [x9]
+    emit modern_ctrl_opened
+
+    /* Three guest descriptors: one read (176-byte IoctlCharacteristics),
+     * two writes (176-byte structure and 208-byte inline block).
+     * CMIF command 12 = NVDRV Ioctl3; ioctl _IOWR('G',5,176).
+     * Verify the returned Ampere arch/impl rather than just IPC success.
+     */
+    prepare modern_ctrl_ioctl3_request
+    modern_gpu_descriptor 8, modern_ctrl_characteristics_input, 176
+    modern_gpu_descriptor 20, modern_ctrl_characteristics_output, 176
+    modern_gpu_descriptor 32, modern_ctrl_characteristics_inline, 208
+    address x9, modern_ctrl_fd
+    ldr w10, [x9]
+    str w10, [x21, #64]
+    mov w10, #0x4705
+    movk w10, #0xc0b0, lsl #16
+    str w10, [x21, #68]
+    ldr w0, [x19, #24]
+    svc #0x21
+    cbnz w0, .Lmodern_as_open_failure
+    ldp w1, w2, [x21]
+    cbnz w1, .Lmodern_as_open_failure
+    cmp w2, #12
+    b.ne .Lmodern_as_open_failure
+    ldr w3, [x21, #16]
+    mov w4, #0x4653
+    movk w4, #0x4f43, lsl #16
+    cmp w3, w4
+    b.ne .Lmodern_as_open_failure
+    ldr w3, [x21, #32]
+    cbnz w3, .Lmodern_as_open_failure
+    address x9, modern_ctrl_characteristics_output
+    ldr w10, [x9, #16]
+    cmp w10, #0x170
+    b.ne .Lmodern_as_open_failure
+    ldr w10, [x9, #20]
+    cmp w10, #0x0e
+    b.ne .Lmodern_as_open_failure
+    emit modern_ctrl_characterized
+
     prepare modern_as_open_request
     modern_gpu_descriptor 8, modern_as_name, (modern_as_name_end - modern_as_name)
     ldr w0, [x19, #24]
@@ -799,7 +868,35 @@ modern_gpu_close_as:
     address x9, modern_as_fd
     str wzr, [x9]
     emit modern_as_closed
+
 .Lmodern_as_close_success:
+    address x9, modern_ctrl_opened_flag
+    ldr w10, [x9]
+    cbz w10, .Lmodern_all_close_success
+    prepare modern_as_close_request
+    address x9, modern_ctrl_fd
+    ldr w10, [x9]
+    str w10, [x21, #32]
+    ldr w0, [x19, #24]
+    svc #0x21
+    cbnz w0, .Lmodern_as_close_failure
+    ldp w1, w2, [x21]
+    cbnz w1, .Lmodern_as_close_failure
+    cmp w2, #12
+    b.ne .Lmodern_as_close_failure
+    ldr w3, [x21, #16]
+    mov w4, #0x4653
+    movk w4, #0x4f43, lsl #16
+    cmp w3, w4
+    b.ne .Lmodern_as_close_failure
+    ldr w3, [x21, #32]
+    cbnz w3, .Lmodern_as_close_failure
+    address x9, modern_ctrl_opened_flag
+    str wzr, [x9]
+    address x9, modern_ctrl_fd
+    str wzr, [x9]
+    emit modern_ctrl_closed
+.Lmodern_all_close_success:
     mov w0, #0
     ldp x29, x30, [sp], #16
     ret
@@ -1238,6 +1335,27 @@ modern_gpu_session_request:
 modern_gpu_register_image_request:
     .word 0x75, 4, 0, 0, 0, 0
     .zero 128 - (. - modern_gpu_register_image_request)
+
+modern_ctrl_ioctl3_request:
+    /* 1 input A and 2 output B descriptors; CMIF command 12 at word 14. */
+    .word 0x02100004, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    .word 0x49434653, 0, 12, 0, 0, 0
+    .zero 128 - (. - modern_ctrl_ioctl3_request)
+modern_ctrl_name:
+    .asciz "/dev/nvhost-ctrl-gpu"
+modern_ctrl_name_end:
+modern_ctrl_characteristics_input:
+    .quad 0xd0, 1
+    .zero 160
+modern_ctrl_opened_message:
+    .ascii "NX2_FRAME_MODERN_CTRL_OPENED\n"
+modern_ctrl_opened_message_end:
+modern_ctrl_characterized_message:
+    .ascii "NX2_FRAME_MODERN_CTRL_CHARACTERIZED\n"
+modern_ctrl_characterized_message_end:
+modern_ctrl_closed_message:
+    .ascii "NX2_FRAME_MODERN_CTRL_CLOSED\n"
+modern_ctrl_closed_message_end:
 modern_as_name:
     .asciz "/dev/nvhost-as-gpu"
 modern_as_name_end:
@@ -1286,8 +1404,16 @@ modern_as_fd:
     .word 0
 modern_as_opened_flag:
     .word 0
+modern_ctrl_fd:
+    .word 0
+modern_ctrl_opened_flag:
+    .word 0
 modern_as_ioctl_output:
     .zero 40
+modern_ctrl_characteristics_output:
+    .zero 176
+modern_ctrl_characteristics_inline:
+    .zero 208
 .endif
 .balign 4096
 image_buffer:

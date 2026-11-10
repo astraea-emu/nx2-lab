@@ -200,7 +200,9 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
     markers = {name: raw.count(f"NX2_FRAME_{name}\n".encode())
                for name in ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE",
                             "MODERN_AS_OPENED", "MODERN_AS_INITIALIZED",
-                            "MODERN_IMAGE_REGISTERED", "MODERN_AS_CLOSED")}
+                            "MODERN_IMAGE_REGISTERED", "MODERN_AS_CLOSED",
+                            "MODERN_CTRL_OPENED", "MODERN_CTRL_CHARACTERIZED",
+                            "MODERN_CTRL_CLOSED")}
     positive = rc == 0 and pixel["every_original_pixel_match"] and all(
         count == 1 for count in markers.values())
     size_observation = original_invalid_size_observation(raw)
