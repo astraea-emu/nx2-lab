@@ -13,7 +13,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from engine_source_preflight import CANDIDATES, inspect, oid
+from engine_source_preflight import CANDIDATES, inspect, oid, git
 
 SVC_PATH = "src/core/hle/kernel/svc/svc_process.cpp"
 CLI_PATH = "src/yuzu_cmd/yuzu.cpp"
@@ -61,6 +61,48 @@ def patch_sources(svc: str, frontend: str) -> tuple[str, str]:
     return svc, frontend
 
 
+
+def verify_applied(checkout: Path, candidate: str) -> dict:
+    """Require precisely the two expected GPL source edits and no other changes."""
+    if candidate not in ("eglantine", "lichii"):
+        raise OverlayError("Unsupported reviewed source revision")
+    checkout = checkout.absolute()
+    if not checkout.is_dir() or checkout.is_symlink():
+        raise OverlayError("Expected an ordinary source checkout")
+    repo, commit, blobs = CANDIDATES[candidate]
+    actual_head = git(checkout, "rev-parse", "HEAD").decode().strip()
+    if actual_head != commit:
+        raise OverlayError("Patched checkout does not match reviewed Git commit")
+    top = Path(git(checkout, "rev-parse", "--show-toplevel").decode().strip())
+    if top.resolve() != checkout.resolve():
+        raise OverlayError("Expected repository root")
+    origin = git(checkout, "remote", "get-url", "origin").decode().strip().removesuffix(".git")
+    if origin not in (f"https://github.com/{repo}", f"git@github.com:{repo}"):
+        raise OverlayError("Patched source repository origin changed")
+    status = set(git(checkout, "status", "--porcelain=v1", "-z",
+                     "--untracked-files=all", "--ignore-submodules=none").split(b"\0")) - {b""}
+    expected_status = {b" M " + path.encode() for path in (SVC_PATH, CLI_PATH)}
+    if status != expected_status:
+        raise OverlayError("Patched source differs beyond the two approved files")
+    original = {}
+    for path, blob in zip((SVC_PATH, CLI_PATH), blobs[:2]):
+        original_bytes = git(checkout, "show", f"{commit}:{path}")
+        if oid(original_bytes) != blob:
+            raise OverlayError("Committed source differs from reviewed Git blob")
+        original[path] = original_bytes.decode("utf-8")
+    expected_svc, expected_cli = patch_sources(original[SVC_PATH], original[CLI_PATH])
+    for path, expected in ((SVC_PATH, expected_svc), (CLI_PATH, expected_cli)):
+        file = checkout / path
+        if file.is_symlink() or not file.is_file() or file.read_bytes() != expected.encode("utf-8"):
+            raise OverlayError("Applied exit overlay bytes differ from reviewed transform")
+    return {
+        "kind": "nx2-reviewed-isolated-guest-exit-v1",
+        "repository": repo, "commit": commit,
+        "source_identity_verified": True, "exactly_two_modified_source_files": True,
+        "reviewed_exit_adapter_applied": True,
+        "emulator_runtime_qualified": False,
+    }
+
 def apply(checkout: Path, candidate: str) -> None:
     if candidate not in ("eglantine", "lichii"):
         raise OverlayError("Adapter is not reviewed for this engine")
@@ -85,6 +127,7 @@ def apply(checkout: Path, candidate: str) -> None:
     subprocess.run(["git", "-C", str(checkout), "diff", "--check",
                     "--", SVC_PATH, CLI_PATH], check=True,
                    stdout=subprocess.DEVNULL)
+    verify_applied(checkout, candidate)
     print("NX2_ISOLATED_GPL_GUEST_EXIT_EXPERIMENT_APPLIED candidate=" + candidate)
     print("NX2_ADAPTER_IS_NOT_RUNTIME_OR_SHUTDOWN_QUALIFICATION")
 

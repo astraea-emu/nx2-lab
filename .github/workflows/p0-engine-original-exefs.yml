@@ -6,6 +6,8 @@ on:
       - 'tools/reference/eden_ns2/engine_source_preflight.py'
       - 'tools/reference/eden_ns2/smoke_candidate_exefs.py'
       - 'tools/reference/eden_ns2/test_engine_qualification.py'
+      - 'tools/reference/eden_ns2/modern_exit_overlay.py'
+      - 'tools/reference/eden_ns2/test_modern_exit_overlay.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -62,17 +64,38 @@ jobs:
           sudo apt-get update -qq
           read -r -a packages <<< "$(python3 nx2/tools/reference/eden_ns2/build_native_engine.py --print-packages)"
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${packages[@]}"
-      - name: Build candidate headless emulator CLI without old Eden overlays
+      - name: Apply exact-source reviewed guest-exit repair only in isolated checkout
+        run: |
+          set -euo pipefail
+          python3 nx2/tools/reference/eden_ns2/modern_exit_overlay.py "$ENGINE" candidate
+      - name: Restore source-compiler cache
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/nx2-modern-ccache
+          key: nx2-original-cli-${{ matrix.engine }}-ubuntu26-clang-${{ hashFiles('candidate/src/CMakeLists.txt') }}-v1
+      - name: Build candidate headless emulator CLI with approved isolated exit repair
+        env:
+          CCACHE_DIR: ${{ runner.temp }}/nx2-modern-ccache
+          CCACHE_MAXSIZE: 1G
+          CCACHE_BASEDIR: ${{ github.workspace }}/candidate
         run: |
           set -euo pipefail
           cmake -S candidate -B "$RUNNER_TEMP/candidate-build" -G Ninja \
             -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DENABLE_QT=OFF -DYUZU_CMD=ON -DYUZU_ROOM=OFF -DYUZU_TESTS=OFF \
             -DBUILD_TESTING=OFF -DENABLE_OPENGL=OFF -DENABLE_WEB_SERVICE=OFF \
             -DENABLE_UPDATE_CHECKER=OFF -DENABLE_CUBEB=OFF -DENABLE_LIBUSB=OFF \
             -DENABLE_WERROR=OFF -DYUZU_USE_CPM=ON
           cmake --build "$RUNNER_TEMP/candidate-build" --target yuzu-cmd --parallel 2
           test -x "$RUNNER_TEMP/candidate-build/bin/eden-cli"
+      - name: Save source-compiler cache after successful build
+        if: steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/nx2-modern-ccache
+          key: nx2-original-cli-${{ matrix.engine }}-ubuntu26-clang-${{ hashFiles('candidate/src/CMakeLists.txt') }}-v1
       - name: Execute NX2-owned ExeFS and negative malformed-META control
         run: |
           set -euo pipefail
@@ -90,7 +113,7 @@ jobs:
           python3 nx2/tools/reference/eden_ns2/smoke_candidate_exefs.py \
             "$ENGINE" candidate "$RUNNER_TEMP/candidate-build" \
             "$RUNNER_TEMP/valid" "$RUNNER_TEMP/invalid" \
-            --output "$RUNNER_TEMP/original-exefs.json" --seconds 30
+            --output "$RUNNER_TEMP/original-exefs.json" --seconds 30 --reviewed-exit-adapter
       - name: Upload redacted source and original guest receipts only
         if: always()
         uses: actions/upload-artifact@v4

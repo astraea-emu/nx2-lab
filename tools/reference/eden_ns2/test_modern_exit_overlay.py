@@ -2,9 +2,16 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """Offline guardrails for the isolated modern guest exit experiment."""
 import unittest
+from pathlib import Path
+import subprocess
+import tempfile
+from unittest.mock import patch
+
+from engine_source_preflight import PATHS, oid
+import engine_source_preflight as source_module
 
 from engine_source_preflight import CANDIDATES
-from modern_exit_overlay import OverlayError, patch_sources
+from modern_exit_overlay import OverlayError, patch_sources, verify_applied, apply
 
 
 SVC = """// SPDX-License-Identifier: GPL-3.0-or-later
@@ -81,6 +88,66 @@ class OverlayTests(unittest.TestCase):
         with self.assertRaises(OverlayError):
             patch_sources(SVC.replace("KProcess::State::Running", "KProcess::State::Exited"),
                           FRONTEND)
+
+
+class AppliedSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name) / "source"
+        self.root.mkdir()
+        self.git("init", "-q")
+        self.git("config", "user.email", "test@example.invalid")
+        self.git("config", "user.name", "Source Test")
+        self.git("remote", "add", "origin", "https://github.com/fixture/source.git")
+        original = {}
+        for file in PATHS:
+            data = SVC.encode() if file.endswith("svc_process.cpp") else (
+                FRONTEND.encode() if file.endswith("yuzu.cpp") else
+                b"// SPDX-License-Identifier: GPL-3.0-or-later\n")
+            output = self.root / file
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(data)
+            original[file] = oid(data)
+        licenses = {}
+        for file in source_module.LICENSES:
+            output = self.root / file
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"GNU GENERAL PUBLIC LICENSE\nVersion 3\n")
+            licenses[file] = oid(output.read_bytes())
+        (self.root / "src/yuzu_cmd/CMakeLists.txt").write_text(
+            "add_executable(yuzu-cmd test.cpp)\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "original GPL test fixture")
+        revision = self.git("rev-parse", "HEAD")
+        self.local_spec = ("fixture/source", revision, tuple(original[file] for file in PATHS))
+        with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
+            with patch.dict(source_module.LICENSES, licenses, clear=True):
+                apply(self.root, "eglantine")
+
+    def git(self, *args):
+        return subprocess.check_output(
+            ["git", "-C", str(self.root), *args], text=True).strip()
+
+    def test_exact_two_file_patch_is_independently_verified(self):
+        with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
+            receipt = verify_applied(self.root, "eglantine")
+        self.assertTrue(receipt["exactly_two_modified_source_files"])
+        self.assertTrue(receipt["source_identity_verified"])
+        self.assertFalse(receipt["emulator_runtime_qualified"])
+
+    def test_extra_modified_source_rejected(self):
+        (self.root / PATHS[2]).write_text("unexpected\n")
+        with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
+            with self.assertRaisesRegex(OverlayError, "two approved files"):
+                verify_applied(self.root, "eglantine")
+
+    def test_tampered_adapter_bytes_rejected(self):
+        p = self.root / "src/yuzu_cmd/yuzu.cpp"
+        p.write_text(p.read_text() + "// unexpected\n")
+        with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
+            with self.assertRaisesRegex(OverlayError, "overlay bytes"):
+                verify_applied(self.root, "eglantine")
 
 
 if __name__ == "__main__":

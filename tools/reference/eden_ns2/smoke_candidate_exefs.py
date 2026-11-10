@@ -23,6 +23,7 @@ import time
 
 import assess_native_exefs as exefs
 from engine_source_preflight import CANDIDATES, inspect
+from modern_exit_overlay import verify_applied
 
 MAIN_SHA = "508edcf6870546ed2f67c6ed11f0df3deb0242427ea2b9d7562ae6d015084ed5"
 NPDM_SHA = "64e25a2e3e37495d75341f9564afa3e6a665f10f94b36ea7e4e3c533b4573148"
@@ -209,13 +210,16 @@ def main() -> int:
     p.add_argument("invalid", type=Path)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--seconds", type=int, default=30)
+    p.add_argument("--reviewed-exit-adapter", action="store_true",
+                   help="require exactly the source-verified, isolated GPL guest-exit patch")
     a = p.parse_args()
     try:
         require(5 <= a.seconds <= 120 and not a.output.exists(),
                 "Require a fresh receipt and a 5-120 second bound")
         require(not a.output.resolve().is_relative_to(a.checkout.resolve()),
                 "Output cannot change source")
-        original = inspect(a.checkout, CANDIDATES[a.candidate])
+        check_source = (lambda: verify_applied(a.checkout, a.candidate)) if a.reviewed_exit_adapter else (lambda: inspect(a.checkout, CANDIDATES[a.candidate]))
+        original = check_source()
         inputs = fixture_pair(a.valid, a.invalid)
         cli, cli_hash = built_cli(a.checkout, a.build)
         with tempfile.TemporaryDirectory(prefix="nx2-original-exefs-") as temp:
@@ -224,7 +228,7 @@ def main() -> int:
             good_rc, good, good_time = run(cli, a.valid.resolve(), root / "valid", a.seconds)
             bad_rc, bad, bad_time = run(cli, a.invalid.resolve(), root / "invalid", a.seconds)
         result = assess_silently(good, bad, good_rc, bad_rc)
-        require(inspect(a.checkout, CANDIDATES[a.candidate]) == original,
+        require(check_source() == original,
                 "Source changed during experiment")
         receipt = {"candidate": a.candidate, "commit": original["commit"],
                    "source_identity_verified": True, "cli_sha256": cli_hash,
@@ -232,7 +236,9 @@ def main() -> int:
                    "seconds": {"help": help_time, "valid": good_time, "invalid": bad_time},
                    "frontend_help": {"rc": help_rc, "lifecycle": lifecycle(help_log),
                                      "natural_exit": help_rc == 0},
-                   "raw_logs_retained": False, "game_compatibility_qualified": False}
+                   "raw_logs_retained": False,
+                   "reviewed_exit_adapter_applied": a.reviewed_exit_adapter,
+                   "game_compatibility_qualified": False}
         a.output.parent.mkdir(parents=True, exist_ok=True)
         a.output.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
         print("NX2_FRONTEND_HELP=" + ("PASS" if help_rc == 0 else "NOT_VERIFIED") +
