@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from engine_source_preflight import PATHS, inspect, oid, PreflightError
-from smoke_candidate_exefs import assess_silently
+from smoke_candidate_exefs import assess_silently, lifecycle
 
 
 class SourceTests(unittest.TestCase):
@@ -99,6 +99,31 @@ class SmokeTests(unittest.TestCase):
                          ["original_controls_pass"])
         self.assertFalse(assess_silently(self.good, self.bad + self.good, 0, 1)
                          ["original_controls_pass"])
+
+    def test_redacted_lifecycle_reports_markers_not_log_content(self):
+        raw = self.good + b"\nFrontend <Error> example.cpp:1:Start: private-token\n"
+        report = lifecycle(raw)
+        self.assertEqual(report["milestones"]["guest_layout"], 1)
+        self.assertEqual(report["milestones"]["original_guest_debug"], 1)
+        self.assertEqual(report["milestones"]["guest_exit"], 1)
+        self.assertEqual(report["last_source_stage"], "frontend")
+        self.assertFalse(report["raw_lines_preserved"])
+        import json
+        receipt = json.dumps(report)
+        self.assertNotIn("private-token", receipt)
+        self.assertNotIn("example.cpp", receipt)
+
+    def test_absent_log_records_do_not_invent_guest_progress(self):
+        report = lifecycle(b"unknown source private-token\n")
+        self.assertEqual(report["milestones"]["guest_exit"], 0)
+        self.assertEqual(report["last_source_stage"], "unclassified")
+
+    def test_loader_reject_and_timeout_stay_distinct(self):
+        result = assess_silently(self.good, self.bad, 0, 137)
+        self.assertFalse(result["original_controls_pass"])
+        self.assertTrue(result["negative_lifecycle"]["milestones"]["invalid_meta_loader"])
+        self.assertTrue(result["negative_lifecycle"]["milestones"]["invalid_meta_frontend"])
+        self.assertEqual(result["negative_rc"], 137)
 
 
 if __name__ == "__main__":

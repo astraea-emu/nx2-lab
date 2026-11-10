@@ -14,6 +14,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -82,7 +83,7 @@ def built_cli(checkout: Path, build: Path) -> tuple[Path, str]:
     return cli, digest.hexdigest()
 
 
-def run(cli: Path, guest: Path, directory: Path, seconds: int) -> tuple[int, bytes, float]:
+def run(cli: Path, guest: Path | None, directory: Path, seconds: int) -> tuple[int, bytes, float]:
     directory.mkdir()
     home = directory / "home"
     home.mkdir()
@@ -94,7 +95,9 @@ def run(cli: Path, guest: Path, directory: Path, seconds: int) -> tuple[int, byt
     command = ["xvfb-run", "-a", "-e", str(directory / "xvfb.log"), "-s",
                "-screen 0 1280x720x24 -nolisten tcp", "timeout",
                "--signal=TERM", "--kill-after=4s", f"{seconds}s",
-               str(cli), "--null-render", "--singlecore", "--game", str(guest / "main")]
+               str(cli)]
+    command += ["--help"] if guest is None else [
+        "--null-render", "--singlecore", "--game", str(guest / "main")]
     log = directory / "runtime.log"
     start = time.monotonic()
     with log.open("wb") as output:
@@ -108,6 +111,57 @@ def run(cli: Path, guest: Path, directory: Path, seconds: int) -> tuple[int, byt
             rc = process.wait()
     require(log.stat().st_size <= exefs.MAX_LOG_SIZE, "Host log exceeds bounded inspection limit")
     return rc, log.read_bytes(), round(time.monotonic() - start, 3)
+
+
+# Deliberately allowlisted *classes*, not copied host log messages.
+# Never persist raw frontend, guest or environment-derived diagnostics.
+LOG_CATEGORIES = (
+    ("guest_layout", exefs.CLASSIFIED),
+    ("original_guest_debug", exefs.GUEST_OUTPUT),
+    ("guest_exit", exefs.GUEST_EXIT),
+    ("invalid_meta_loader", exefs.NPDM_FAILURE),
+    ("invalid_meta_frontend", exefs.FRONTEND_LOADER_FAILURE),
+)
+SOURCE_STAGE = (
+    ("frontend", re.compile(r"\bFrontend <(?:Info|Warning|Error|Critical)> ")),
+    ("network", re.compile(r"\bNetwork <(?:Info|Warning|Error|Critical)> ")),
+    ("core", re.compile(r"\bCore <(?:Info|Warning|Error|Critical)> ")),
+    ("kernel", re.compile(r"\bKernel\.[^ ]+ <(?:Info|Warning|Error|Critical)> ")),
+    ("guest_debug", re.compile(r"\bDebug\.Emulated <(?:Info|Warning|Error|Critical)> ")),
+    ("gpu", re.compile(r"\b(?:Render|VideoCore|HW\.GPU)[^ ]* <(?:Info|Warning|Error|Critical)> ")),
+)
+
+
+def lifecycle(raw: bytes) -> dict:
+    """Lossy, redacted milestones for the first real modern-engine execution.
+
+    A count/last-stage hint is not a fault attribution or a compatibility pass.
+    """
+    lines = exefs.source_lines(raw)
+    category_counts = {name: sum(bool(pattern.fullmatch(line)) for line in lines)
+                       for name, pattern in LOG_CATEGORIES}
+    stage_counts = {name: 0 for name, _ in SOURCE_STAGE}
+    first_stage = last_stage = "unclassified"
+    for line in lines:
+        stage = next((name for name, pattern in SOURCE_STAGE if pattern.search(line)), None)
+        if stage:
+            stage_counts[stage] = min(stage_counts[stage] + 1, 100000)
+            if first_stage == "unclassified":
+                first_stage = stage
+            last_stage = stage
+    return {
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "line_count": min(len(lines), 1000000),
+        "nul_bytes": min(raw.count(b"\0"), 1000000),
+        "milestones": category_counts,
+        "source_stage_counts": stage_counts,
+        "first_source_stage": first_stage,
+        "last_source_stage": last_stage,
+        "fault_signature_seen": bool(exefs.EXECUTION_FAILURE.search(
+            exefs.normalize(raw))),
+        "raw_lines_preserved": False,
+    }
 
 
 def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
@@ -141,6 +195,8 @@ def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
             "layout_records": classification, "original_debug_svc_records": debug,
             "exit_svc_records": exit_svc, "negative_meta_diagnostic": negative,
             "positive_rc": good_rc, "negative_rc": bad_rc,
+            "positive_lifecycle": lifecycle(good),
+            "negative_lifecycle": lifecycle(bad),
             "log_adapter_or_runtime_unverified_if_failed": not accepted}
 
 
@@ -164,6 +220,7 @@ def main() -> int:
         cli, cli_hash = built_cli(a.checkout, a.build)
         with tempfile.TemporaryDirectory(prefix="nx2-original-exefs-") as temp:
             root = Path(temp)
+            help_rc, help_log, help_time = run(cli, None, root / "help", 10)
             good_rc, good, good_time = run(cli, a.valid.resolve(), root / "valid", a.seconds)
             bad_rc, bad, bad_time = run(cli, a.invalid.resolve(), root / "invalid", a.seconds)
         result = assess_silently(good, bad, good_rc, bad_rc)
@@ -172,10 +229,14 @@ def main() -> int:
         receipt = {"candidate": a.candidate, "commit": original["commit"],
                    "source_identity_verified": True, "cli_sha256": cli_hash,
                    "original_guest": inputs, "assessment": result,
-                   "seconds": {"valid": good_time, "invalid": bad_time},
+                   "seconds": {"help": help_time, "valid": good_time, "invalid": bad_time},
+                   "frontend_help": {"rc": help_rc, "lifecycle": lifecycle(help_log),
+                                     "natural_exit": help_rc == 0},
                    "raw_logs_retained": False, "game_compatibility_qualified": False}
         a.output.parent.mkdir(parents=True, exist_ok=True)
         a.output.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
+        print("NX2_FRONTEND_HELP=" + ("PASS" if help_rc == 0 else "NOT_VERIFIED") +
+              " candidate=" + a.candidate)
         print("NX2_ORIGINAL_EXEFS_" +
               ("PASS" if result["original_controls_pass"] else "NOT_VERIFIED") +
               " candidate=" + a.candidate + " first_stop=" + result["first_stop"])
