@@ -339,8 +339,9 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
         # Every pre-existing original byte and both image pages stay identical.
         self.assertTrue(mapped[1].startswith(previous[1]))
         self.assertGreater(len(mapped[1]), len(previous[1]))
-        self.assertNotEqual(mapped[2][:4096], previous[2][:4096])
-        self.assertEqual(mapped[2][4096:], previous[2][4096:])
+        # Device FD, opened flag and ioctl output are all zero before guest
+        # execution: the complete frozen record+image data remains identical.
+        self.assertEqual(mapped[2], previous[2])
         self.assertEqual(len(mapped[2]), 0x3000)
         verify_frame_fixture(build_frame_nso(mapped), build_extended_npdm(), 0)
         self.assertEqual(mapped, compile_frame_segments(

@@ -732,6 +732,9 @@ modern_gpu_open_as:
     tbnz w6, #31, .Lmodern_as_open_failure
     address x9, modern_as_fd
     str w6, [x9]
+    address x9, modern_as_opened_flag
+    mov w7, #1
+    str w7, [x9]
     emit modern_as_opened
 
     prepare modern_as_ioctl_request
@@ -770,9 +773,9 @@ modern_gpu_open_as:
  * The real CMIF Close(fd) must succeed; never silently discard an open FD. */
 modern_gpu_close_as:
     stp x29, x30, [sp, #-16]!
-    address x9, modern_as_fd
+    address x9, modern_as_opened_flag
     ldr w10, [x9]
-    tbnz w10, #31, .Lmodern_as_close_success
+    cbz w10, .Lmodern_as_close_success
     prepare modern_as_close_request
     address x9, modern_as_fd
     ldr w10, [x9]
@@ -791,9 +794,10 @@ modern_gpu_close_as:
     b.ne .Lmodern_as_close_failure
     ldr w3, [x21, #32]
     cbnz w3, .Lmodern_as_close_failure
+    address x9, modern_as_opened_flag
+    str wzr, [x9]
     address x9, modern_as_fd
-    mov w10, #-1
-    str w10, [x9]
+    str wzr, [x9]
     emit modern_as_closed
 .Lmodern_as_close_success:
     mov w0, #0
@@ -1279,7 +1283,9 @@ line_buffer:
 .if NX2_FRAME_MODERN_GPU_IMAGE_MAP
 .balign 16
 modern_as_fd:
-    .word -1
+    .word 0
+modern_as_opened_flag:
+    .word 0
 modern_as_ioctl_output:
     .zero 40
 .endif
