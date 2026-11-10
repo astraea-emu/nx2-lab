@@ -156,6 +156,12 @@ class SmokeTests(unittest.TestCase):
             self.assertFalse(report["source_assert_site_count_truncated"])
             self.assertNotIn("private", str(report))
             self.assertNotIn("argument", str(report))
+            # A valid file name paired with an invented source line is
+            # not an attributable source location.
+            invented = raw.replace("core/guest.cpp:1:Run:",
+                                   "core/guest.cpp:2000:Run:")
+            self.assertEqual(fault_signatures(invented.splitlines(), root)
+                             ["reviewed_source_assert_sites"], [])
             # Attribution is for debugging; a matching source site cannot
             # certify a clean emulator execution or defeat strict assessment.
             assessment = assess_silently(self.good + raw.encode(), self.bad, 0, 1,
