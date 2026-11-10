@@ -311,10 +311,10 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
     def test_modern_direct_vi2_present_reply_matches_source_defined_available_slots(self):
         assembly = Path(__file__).with_name("native_frame_probe.S").read_text()
         self.assertIn(
-            ".if NX2_FRAME_MODERN_DIRECT_VI2\\n"
-            "    check_u64 present, 0x7fff\\n"
-            ".else\\n"
-            "    check_u64 present, 0x7ffe\\n"
+            ".if NX2_FRAME_MODERN_DIRECT_VI2\n"
+            "    check_u64 present, 0x7fff\n"
+            ".else\n"
+            "    check_u64 present, 0x7ffe\n"
             ".endif", assembly)
         # Do not replace the original guest or its image specification.
         prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
