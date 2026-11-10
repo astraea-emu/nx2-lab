@@ -136,12 +136,12 @@ SOURCE_STAGE = (
 # Do not persist host messages or paths. This taxonomy is diagnostic only:
 # strict source-attributed execution-failure checks remain unchanged.
 FAULT_SIGNATURES = (
-    ("assertion", re.compile(r"\\bassert(?:ion)?\\b", re.IGNORECASE)),
+    ("assertion", re.compile(r"\bassert(?:ion)?\b", re.IGNORECASE)),
     ("guest_exception", re.compile(r"ExceptionRaised", re.IGNORECASE)),
     ("unmapped_instruction", re.compile(
         r"Cannot execute instruction at unmapped address", re.IGNORECASE)),
     ("segmentation_fault", re.compile(r"Segmentation fault", re.IGNORECASE)),
-    ("aborted", re.compile(r"\\bAborted\\b", re.IGNORECASE)),
+    ("aborted", re.compile(r"\bAborted\b", re.IGNORECASE)),
     ("address_sanitizer", re.compile(r"AddressSanitizer", re.IGNORECASE)),
     ("undefined_behavior_sanitizer", re.compile(r"UndefinedBehaviorSanitizer", re.IGNORECASE)),
     ("runtime_error", re.compile(r"runtime error:", re.IGNORECASE)),
