@@ -12,6 +12,13 @@ spec.loader.exec_module(radar)
 
 
 class RadarTests(unittest.TestCase):
+    def test_current_modern_engine_sources_are_monitored(self):
+        names = radar.watchlist(ROOT / "tools/competitive_radar.json")
+        self.assertIn("Eglantine-Community/Eglantine", names)
+        self.assertIn("zortos293/Lichii", names)
+        self.assertIn("0x2593/Eden-NS2", names)
+        self.assertNotIn("Djihads80/Eglantine", names)
+
     def test_watchlist_rejects_bad_names_and_duplicates(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "list.json"
