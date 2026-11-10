@@ -9,9 +9,11 @@ from unittest.mock import patch
 
 from engine_source_preflight import PATHS, oid
 import engine_source_preflight as source_module
+import modern_exit_overlay as overlay
 
 from engine_source_preflight import CANDIDATES
-from modern_exit_overlay import OverlayError, patch_sources, verify_applied, apply
+from modern_exit_overlay import (OverlayError, patch_sources, patch_metadata_magic,
+                                 verify_applied, apply, META_PATH)
 
 
 SVC = """// SPDX-License-Identifier: GPL-3.0-or-later
@@ -41,6 +43,17 @@ void SDL_AppQuit() {
 }
 """
 
+META_SOURCE = """// SPDX-License-Identifier: GPL-3.0-or-later
+Loader::ResultStatus ProgramMetadata::Load(VirtualFile file) {
+    if (sizeof(Header) != file->ReadObject(&npdm_header)) {
+        return Loader::ResultStatus::ErrorBadNPDMHeader;
+    }
+    if (sizeof(AcidHeader) != file->ReadObject(&acid_header, npdm_header.acid_offset)) {
+        return Loader::ResultStatus::ErrorBadACIDHeader;
+    }
+}
+"""
+
 
 class OverlayTests(unittest.TestCase):
     def test_both_exact_reviewed_candidate_pins_exist(self):
@@ -63,6 +76,26 @@ class OverlayTests(unittest.TestCase):
         self.assertEqual(cli.count("ShutdownMainProcess()"), 1)
         self.assertTrue(cli.startswith("// SPDX-License-Identifier: GPL-3.0-or-later"))
         self.assertTrue(svc.startswith("// SPDX-License-Identifier: GPL-3.0-or-later"))
+
+    def test_npdm_signature_guard_precedes_acid_offset_parsing(self):
+        checked = patch_metadata_magic(META_SOURCE)
+        self.assertIn('std::memcmp(npdm_header.magic.data(), "META", 4)', checked)
+        self.assertLess(checked.index("npdm_header.magic.data()"),
+                        checked.index("npdm_header.acid_offset"))
+        self.assertEqual(checked.count("ErrorBadNPDMHeader;"), 2)
+        self.assertTrue(checked.startswith("// SPDX-License-Identifier: GPL-3.0-or-later"))
+
+    def test_npdm_guard_rejects_missing_duplicate_or_prior_patch(self):
+        checked = patch_metadata_magic(META_SOURCE)
+        for value in (checked, META_SOURCE.replace(
+                "    if (sizeof(Header)", "    if (sizeof(DifferentHeader)"),
+                META_SOURCE.replace("    if (sizeof(AcidHeader)", 
+                                    "    if (sizeof(Header) != file->ReadObject(&npdm_header)) {\n"
+                                    "        return Loader::ResultStatus::ErrorBadNPDMHeader;\n"
+                                    "    }\n    if (sizeof(AcidHeader)")):
+            with self.subTest(case=value[:60]):
+                with self.assertRaises(OverlayError):
+                    patch_metadata_magic(value)
 
     def test_refuses_double_application(self):
         patched = patch_sources(SVC, FRONTEND)
@@ -115,6 +148,10 @@ class AppliedSourceTests(unittest.TestCase):
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(b"GNU GENERAL PUBLIC LICENSE\nVersion 3\n")
             licenses[file] = oid(output.read_bytes())
+        meta_file = self.root / META_PATH
+        meta_file.parent.mkdir(parents=True, exist_ok=True)
+        meta_file.write_text(META_SOURCE)
+        self.local_meta_blob = oid(META_SOURCE.encode())
         (self.root / "src/yuzu_cmd/CMakeLists.txt").write_text(
             "add_executable(yuzu-cmd test.cpp)\n")
         self.git("add", ".")
@@ -123,31 +160,50 @@ class AppliedSourceTests(unittest.TestCase):
         self.local_spec = ("fixture/source", revision, tuple(original[file] for file in PATHS))
         with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
             with patch.dict(source_module.LICENSES, licenses, clear=True):
-                apply(self.root, "eglantine")
+                with patch.object(overlay, "META_BLOB", self.local_meta_blob):
+                    apply(self.root, "eglantine")
 
     def git(self, *args):
         return subprocess.check_output(
             ["git", "-C", str(self.root), *args], text=True).strip()
 
-    def test_exact_two_file_patch_is_independently_verified(self):
+    def test_exact_three_file_patch_is_independently_verified(self):
         with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
-            receipt = verify_applied(self.root, "eglantine")
-        self.assertTrue(receipt["exactly_two_modified_source_files"])
+            with patch.object(overlay, "META_BLOB", self.local_meta_blob):
+                receipt = verify_applied(self.root, "eglantine")
+        self.assertTrue(receipt["exactly_three_modified_source_files"])
+        self.assertTrue(receipt["reviewed_npdm_signature_guard_applied"])
         self.assertTrue(receipt["source_identity_verified"])
         self.assertFalse(receipt["emulator_runtime_qualified"])
 
     def test_extra_modified_source_rejected(self):
         (self.root / PATHS[2]).write_text("unexpected\n")
         with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
-            with self.assertRaisesRegex(OverlayError, "two approved files"):
-                verify_applied(self.root, "eglantine")
+            with patch.object(overlay, "META_BLOB", self.local_meta_blob):
+                with self.assertRaisesRegex(OverlayError, "three approved files"):
+                    verify_applied(self.root, "eglantine")
 
     def test_tampered_adapter_bytes_rejected(self):
         p = self.root / "src/yuzu_cmd/yuzu.cpp"
         p.write_text(p.read_text() + "// unexpected\n")
         with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
-            with self.assertRaisesRegex(OverlayError, "overlay bytes"):
-                verify_applied(self.root, "eglantine")
+            with patch.object(overlay, "META_BLOB", self.local_meta_blob):
+                with self.assertRaisesRegex(OverlayError, "overlay bytes"):
+                    verify_applied(self.root, "eglantine")
+
+    def test_mutated_npdm_guard_bytes_rejected(self):
+        path = self.root / META_PATH
+        path.write_text(path.read_text().replace('"META", 4', '"METX", 4'))
+        with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
+            with patch.object(overlay, "META_BLOB", self.local_meta_blob):
+                with self.assertRaisesRegex(OverlayError, "overlay bytes"):
+                    verify_applied(self.root, "eglantine")
+
+    def test_wrong_npdm_source_blob_rejected(self):
+        with patch.dict(CANDIDATES, {"eglantine": self.local_spec}):
+            with patch.object(overlay, "META_BLOB", "0" * 40):
+                with self.assertRaisesRegex(OverlayError, "reviewed Git blob"):
+                    verify_applied(self.root, "eglantine")
 
 
 if __name__ == "__main__":
