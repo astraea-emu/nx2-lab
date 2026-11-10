@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 from engine_source_preflight import PATHS, inspect, oid, PreflightError
-from smoke_candidate_exefs import assess_silently, lifecycle
+from smoke_candidate_exefs import assess_silently, lifecycle, fault_signatures
 
 
 class SourceTests(unittest.TestCase):
@@ -120,6 +120,45 @@ class SmokeTests(unittest.TestCase):
         self.assertEqual(result["first_stop"], "negative_loader_diagnostic_not_attributed")
         self.assertEqual(result["negative_guest_debug_records"], 0)
         self.assertEqual(result["negative_guest_kernel_svc_records"], 0)
+
+    def test_fault_taxonomy_is_bounded_and_never_contains_raw_messages(self):
+        messages = (
+            "[ 0.01] Frontend <Warning> secret.cpp:12:Boot: "
+            "Assertion in private-user-path\\n"
+            "[ 0.02] Kernel.SVC <Error> private.cpp:22:Fault: "
+            "ExceptionRaised private-key\\n"
+            "unattributed runtime error: private-value\\n"
+        )
+        report = fault_signatures(messages.splitlines())
+        self.assertEqual(report["categories"]["assertion"], 1)
+        self.assertEqual(report["categories"]["guest_exception"], 1)
+        self.assertEqual(report["categories"]["runtime_error"], 1)
+        self.assertEqual(report["source_stages"]["frontend"], 1)
+        self.assertEqual(report["source_stages"]["kernel"], 1)
+        self.assertEqual(report["source_stages"]["unclassified"], 1)
+        self.assertNotIn("private", str(report))
+        self.assertNotIn("secret", str(report))
+
+    def test_fault_signatures_remain_strict_runtime_rejection(self):
+        positive_fault = self.good + (
+            b"[ 1.0] Frontend <Error> file.cpp:1:Start: "
+            b"Assertion at private-path\\n"
+        )
+        result = assess_silently(positive_fault, self.bad, 0, 1)
+        self.assertFalse(result["original_controls_pass"])
+        self.assertEqual(result["first_stop"],
+                         "positive_execution_fault_signature_observed")
+        self.assertEqual(result["positive_lifecycle"]
+                         ["fault_signature_evidence"]["categories"]["assertion"], 1)
+
+        negative_fault = self.bad + b"runtime error: private-token\\n"
+        result = assess_silently(self.good, negative_fault, 0, 1)
+        self.assertFalse(result["original_controls_pass"])
+        self.assertEqual(result["first_stop"],
+                         "negative_execution_fault_signature_observed")
+        self.assertEqual(result["negative_lifecycle"]
+                         ["fault_signature_evidence"]["categories"]["runtime_error"], 1)
+        self.assertNotIn("private-token", str(result))
 
     def test_redacted_lifecycle_reports_markers_not_log_content(self):
         raw = self.good + b"\nFrontend <Error> example.cpp:1:Start: private-token\n"
