@@ -245,6 +245,7 @@ def main() -> int:
                                      "natural_exit": help_rc == 0},
                    "raw_logs_retained": False,
                    "reviewed_exit_adapter_applied": a.reviewed_exit_adapter,
+                   "reviewed_npdm_signature_guard_applied": a.reviewed_exit_adapter,
                    "game_compatibility_qualified": False}
         a.output.parent.mkdir(parents=True, exist_ok=True)
         a.output.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
