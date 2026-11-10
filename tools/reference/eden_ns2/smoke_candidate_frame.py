@@ -87,14 +87,31 @@ def original_guest_failure_step(raw: bytes) -> dict:
         return {"step_observed_once": False, "step": None,
                 "stage": "unclassified"}
     step = int(seen[0], 16)
-    if not 0 <= step <= 33:
+    # Original cleanup release checks are numbered 34..40; do not conflate
+    # those authored failures with invalid/corrupted record values.
+    if not 0 <= step <= 40:
         return {"step_observed_once": False, "step": None,
                 "stage": "out_of_contract"}
     stage = ("completed" if step == 0 else "setup" if step <= 19 else
              "resource_registration" if step <= 29 else
-             "present" if step == 30 else "retirement")
+             "present" if step == 30 else
+             "retirement" if step <= 33 else "cleanup_release")
     return {"step_observed_once": True, "step": step, "stage": stage}
 
+
+
+
+def original_graphics_device_mapping_observation(raw: bytes) -> dict:
+    """Count fixed known upstream categories; do not retain host messages."""
+    return {
+        "native_image_missing_device_mapping_count":
+            min(raw.count(b"has no device mapping"), 1000),
+        "gpu_mapping_missing_address_space_count":
+            min(raw.count(b"no address space or session"), 1000),
+        "native_vi2_present_request_count":
+            min(raw.count(b"nx2:vi2 229 present #"), 1000),
+        "raw_host_log_retained": False,
+    }
 
 
 ORIGINAL_SIZE_FIELDS = ("transport", "header0", "header1", "result", "lo", "hi")
@@ -191,6 +208,7 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
         "natural_exit": rc == 0, "process_rc": rc, "elapsed_seconds": elapsed,
         "original_guest_markers": markers,
         "original_guest_failure_stage": original_guest_failure_step(raw),
+        "host_graphics_mapping_categories": original_graphics_device_mapping_observation(raw),
         "original_invalid_image_size_control": size_observation,
         "capture_count": len(cap_files),
         "capture": pixel, "lifecycle": lifecycle(raw),

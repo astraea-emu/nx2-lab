@@ -7,6 +7,7 @@ import unittest
 from smoke_candidate_frame import (
     HEIGHT, SCALE, TGA_H, TGA_W, WIDTH, check_capture, expected_pixels,
     original_guest_failure_step, original_invalid_size_observation,
+    original_graphics_device_mapping_observation,
 )
 
 
@@ -68,7 +69,7 @@ class ModernOriginalPixelsTests(unittest.TestCase):
             b"NX2_FRAME fail_step=00000000")["stage"], "completed")
 
     def test_missing_duplicated_or_out_of_contract_stage_rejected(self):
-        for raw in (b"", b"NX2_FRAME fail_step=00000022",
+        for raw in (b"", b"NX2_FRAME fail_step=00000029",
                     b"NX2_FRAME fail_step=00000001\n"
                     b"NX2_FRAME fail_step=00000002"):
             with self.subTest(raw=raw):
@@ -94,6 +95,28 @@ class ModernOriginalPixelsTests(unittest.TestCase):
         for raw in (b"", sample, sample + sample):
             self.assertFalse(original_invalid_size_observation(raw)["fields_observed_once"])
             self.assertNotIn("private", str(original_invalid_size_observation(raw)))
+
+
+    def test_cleanup_release_failures_are_not_discarded_as_out_of_contract(self):
+        for step in (34, 35, 36, 37, 38, 39, 40):
+            with self.subTest(step=step):
+                report = original_guest_failure_step(
+                    f"NX2_FRAME fail_step={step:08x}\n".encode())
+                self.assertEqual(report["stage"], "cleanup_release")
+                self.assertEqual(report["step"], step)
+                self.assertTrue(report["step_observed_once"])
+
+    def test_redacted_device_mapping_categories_only(self):
+        raw = (b"secret-address GPU: nx2:vi2 229 present #1\n"
+               b"guest image 42 has no device mapping @0xSECRET\n"
+               b"GPU memory: no address space or session secret path\n")
+        report = original_graphics_device_mapping_observation(raw)
+        self.assertEqual(report["native_image_missing_device_mapping_count"], 1)
+        self.assertEqual(report["gpu_mapping_missing_address_space_count"], 1)
+        self.assertEqual(report["native_vi2_present_request_count"], 1)
+        self.assertFalse(report["raw_host_log_retained"])
+        self.assertNotIn("secret", str(report).lower())
+
 
 
 if __name__ == "__main__":
