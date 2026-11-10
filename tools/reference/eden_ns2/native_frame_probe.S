@@ -17,6 +17,14 @@
 .if (NX2_FRAME_TIPC_COPY_HANDLES != 0) && (NX2_FRAME_TIPC_COPY_HANDLES != 1)
     .error "NX2_FRAME_TIPC_COPY_HANDLES must be 0 or 1"
 .endif
+/* Preserve the original invalid-size request as an observed control for modern
+ * positive-only graphics; the strict frozen-Eden rejection stays default. */
+.ifndef NX2_FRAME_OBSERVE_INVALID_SIZE
+    .set NX2_FRAME_OBSERVE_INVALID_SIZE, 0
+.endif
+.if (NX2_FRAME_OBSERVE_INVALID_SIZE != 0) && (NX2_FRAME_OBSERVE_INVALID_SIZE != 1)
+    .error "NX2_FRAME_OBSERVE_INVALID_SIZE must be 0 or 1"
+.endif
 .if (NX2_FRAME_VARIANT != 0) && (NX2_FRAME_VARIANT != 1)
     .error "NX2_FRAME_VARIANT must be 0 or 1"
 .endif
@@ -459,8 +467,22 @@ _start:
     prepare size_zero_request
     send 5, size_zero
     capture_u64 size_zero
+.if NX2_FRAME_OBSERVE_INVALID_SIZE
+    /* Same original invalid input, same reply records, strict TIPC transport
+     * and shape; continue to test VALID presentation without claiming the
+     * invalid-size response passed its separate original rejection oracle. */
+    add x9, x22, #F_size_zero_transport
+    ldp w0, w1, [x9]
+    ldr w2, [x9, #8]
+    cbnz w0, failure
+    cmp w1, #(16 + 435)
+    b.ne failure
+    cmp w2, #3
+    b.ne failure
+.else
     tipc_check size_zero, 435, 0x100f3, 3
     check_u64 size_zero, 0
+.endif
     step 18
     prepare size_valid_request
     send 5, size_valid

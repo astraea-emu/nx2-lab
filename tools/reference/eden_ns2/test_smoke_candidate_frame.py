@@ -6,7 +6,7 @@ import unittest
 
 from smoke_candidate_frame import (
     HEIGHT, SCALE, TGA_H, TGA_W, WIDTH, check_capture, expected_pixels,
-    original_guest_failure_step,
+    original_guest_failure_step, original_invalid_size_observation,
 )
 
 
@@ -73,6 +73,27 @@ class ModernOriginalPixelsTests(unittest.TestCase):
                     b"NX2_FRAME fail_step=00000002"):
             with self.subTest(raw=raw):
                 self.assertFalse(original_guest_failure_step(raw)["step_observed_once"])
+
+    def test_invalid_size_response_is_reported_without_accepting_it(self):
+        def record(result, lo=0, hi=0):
+            return b"".join(
+                f"NX2_FRAME size_zero_{name}={value:08x}\n".encode()
+                for name, value in (
+                    ("transport", 0), ("header0", 451), ("header1", 3),
+                    ("result", result), ("lo", lo), ("hi", hi)))
+        expected = original_invalid_size_observation(record(0x100F3))
+        self.assertTrue(expected["original_rejection_observed"])
+        bypassed = original_invalid_size_observation(record(0, 8192))
+        self.assertTrue(bypassed["fields_observed_once"])
+        self.assertFalse(bypassed["original_rejection_observed"])
+        self.assertEqual(bypassed["returned_size"], 8192)
+        self.assertEqual(bypassed["returned_code"], "0x00000000")
+
+    def test_duplicate_missing_and_private_size_fields_fail_closed(self):
+        sample = b"NX2_FRAME size_zero_result=00000000 private-path\n"
+        for raw in (b"", sample, sample + sample):
+            self.assertFalse(original_invalid_size_observation(raw)["fields_observed_once"])
+            self.assertNotIn("private", str(original_invalid_size_observation(raw)))
 
 
 if __name__ == "__main__":

@@ -279,5 +279,19 @@ class ModernCopiedSessionHandleTests(unittest.TestCase):
             ".endif", assembly)
 
 
+    def test_modern_positive_probe_keeps_original_image_and_negative_input(self):
+        prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
+        strict = compile_frame_segments(prefix, variant=0, copy_tipc_handles=True)
+        observed = compile_frame_segments(
+            prefix, variant=0, copy_tipc_handles=True, observe_invalid_size=True)
+        self.assertNotEqual(observed[0], strict[0])
+        self.assertEqual(observed[1:], strict[1:])
+        verify_frame_fixture(build_frame_nso(observed), build_extended_npdm(), 0)
+
+    def test_invalid_size_observation_requires_explicit_boolean(self):
+        with self.assertRaisesRegex(ValueError, "observe_invalid_size must be boolean"):
+            compile_frame_segments(observe_invalid_size=1)
+
+
 if __name__ == "__main__":
     unittest.main()

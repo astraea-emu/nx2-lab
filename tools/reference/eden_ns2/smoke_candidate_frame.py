@@ -96,6 +96,33 @@ def original_guest_failure_step(raw: bytes) -> dict:
     return {"step_observed_once": True, "step": step, "stage": stage}
 
 
+
+ORIGINAL_SIZE_FIELDS = ("transport", "header0", "header1", "result", "lo", "hi")
+SIZE_FIELD = re.compile(
+    rb"NX2_FRAME size_zero_(transport|header0|header1|result|lo|hi)=([0-9a-f]{8})"
+)
+
+
+def original_invalid_size_observation(raw: bytes) -> dict:
+    """Read only the six original guest-owned numeric fields; never log text."""
+    captures = {key: [] for key in ORIGINAL_SIZE_FIELDS}
+    for name, hex_value in SIZE_FIELD.findall(raw):
+        captures[name.decode()].append(int(hex_value, 16))
+    if any(len(captures[name]) != 1 for name in ORIGINAL_SIZE_FIELDS):
+        return {"fields_observed_once": False, "original_rejection_observed": False,
+                "returned_code": None, "returned_size": None}
+    values = {key: captures[key][0] for key in ORIGINAL_SIZE_FIELDS}
+    rejection = (values["transport"] == 0 and values["header0"] == 16 + 435 and
+                 values["header1"] == 3 and values["result"] == 0x100F3 and
+                 values["lo"] == 0 and values["hi"] == 0)
+    return {
+        "fields_observed_once": True,
+        "original_rejection_observed": bool(rejection),
+        "returned_code": f"0x{values['result']:08x}",
+        "returned_size": values["lo"] | (values["hi"] << 32),
+    }
+
+
 def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dict:
     work = root / f"variant-{variant}"
     work.mkdir()
@@ -103,7 +130,7 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
     guest.mkdir()
     # Eglantine/Lichii return copied GSV session handles, unlike frozen Eden.
     parts = compile_frame_segments("aarch64-linux-gnu-", variant=variant,
-                                   copy_tipc_handles=True)
+                                   copy_tipc_handles=True, observe_invalid_size=True)
     main, npdm = build_frame_nso(parts), build_extended_npdm()
     verify_frame_fixture(main, npdm, variant)
     (guest / "main").write_bytes(main)
@@ -153,8 +180,9 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
     pixel = check_capture(captured, variant)
     markers = {name: raw.count(f"NX2_FRAME_{name}\n".encode())
                for name in ("BEGIN", "PRESENT_BEGIN", "PRESENTED", "CLEANUP_BEGIN", "COMPLETE")}
-    passed = rc == 0 and pixel["every_original_pixel_match"] and all(
+    positive = rc == 0 and pixel["every_original_pixel_match"] and all(
         count == 1 for count in markers.values())
+    size_observation = original_invalid_size_observation(raw)
     return {
         "variant": variant,
         "source_authored_main_sha256": hashlib.sha256(main).hexdigest(),
@@ -162,9 +190,12 @@ def run_one(cli: Path, variant: int, root: Path, icd: Path, seconds: int) -> dic
         "natural_exit": rc == 0, "process_rc": rc, "elapsed_seconds": elapsed,
         "original_guest_markers": markers,
         "original_guest_failure_stage": original_guest_failure_step(raw),
+        "original_invalid_image_size_control": size_observation,
         "capture_count": len(cap_files),
         "capture": pixel, "lifecycle": lifecycle(raw),
-        "all_graphics_controls_passed": bool(passed),
+        "positive_graphics_controls_passed": bool(positive),
+        "full_original_contract_passed": bool(
+            positive and size_observation["original_rejection_observed"]),
     }
 
 
@@ -193,16 +224,19 @@ def main() -> int:
         if verify_applied(a.checkout, a.candidate) != source:
             raise ValueError("Engine source changed during graphics experiment")
         different = records[0]["capture"]["capture_sha256"] != records[1]["capture"]["capture_sha256"]
-        success = all(r["all_graphics_controls_passed"] for r in records) and different
+        success = all(r["positive_graphics_controls_passed"] for r in records) and different
         receipt = {
             "kind": "nx2-original-modern-cpu-image-v1",
             "candidate": a.candidate, "revision": source["commit"],
             "approved_exit_adapter": True,
             "original_guest_tipc_copy_handle_adapter": True,
+            "invalid_image_size_input_preserved_as_observation": True,
             "source_built_cli_sha256": sha,
             "software_vulkan_icd": manifests[0].name,
             "two_variants_produce_different_captures": bool(different),
-            "original_graphics_pass": bool(success),
+            "original_positive_graphics_pass": bool(success),
+            "full_original_native_frame_contract_qualified": bool(
+                success and all(r["full_original_contract_passed"] for r in records)),
             "loader_negative_control_qualified": False,
             "game_compatibility_qualified": False,
             "raw_runtime_logs_retained": False,
@@ -210,7 +244,7 @@ def main() -> int:
         }
         a.output.parent.mkdir(parents=True, exist_ok=True)
         a.output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
-        print("NX2_MODERN_ORIGINAL_CPU_IMAGE=" +
+        print("NX2_MODERN_ORIGINAL_CPU_IMAGE_POSITIVE=" +
               ("PASS" if success else "NOT_VERIFIED") + " candidate=" + a.candidate)
         return 0 if success else 1
     except (OSError, ValueError, subprocess.SubprocessError) as e:
