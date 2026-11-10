@@ -1274,9 +1274,8 @@ notification_guard_after:
 line_buffer:
     .zero 96
 /* Keep the device-shared backing on separate pages from writable records. */
-.balign 4096
-image_buffer:
-    .zero 8192
+/* Keep the new metadata and output buffer in the original record page.
+ * The image MUST remain the last exact two pages at 0x6000..0x7fff. */
 .if NX2_FRAME_MODERN_GPU_IMAGE_MAP
 .balign 16
 modern_as_fd:
@@ -1284,4 +1283,7 @@ modern_as_fd:
 modern_as_ioctl_output:
     .zero 40
 .endif
+.balign 4096
+image_buffer:
+    .zero 8192
 .section .note.GNU-stack, "", @progbits
