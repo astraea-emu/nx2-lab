@@ -173,6 +173,9 @@ def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
     classification = count(exefs.CLASSIFIED)
     debug = count(exefs.GUEST_OUTPUT)
     exit_svc = count(exefs.GUEST_EXIT)
+    bad_lines = exefs.source_lines(bad)
+    negative_guest_debug = sum(bool(exefs.ANY_GUEST_OUTPUT.fullmatch(line)) for line in bad_lines)
+    negative_guest_svc = sum(bool(exefs.ANY_GUEST_SVC.fullmatch(line)) for line in bad_lines)
     negative = exefs.expected_npdm_rejection(bad)
     if good_rc in (124, 137, -9):
         first = "host_did_not_exit_naturally"
@@ -184,6 +187,8 @@ def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
         first = "guest_exit_svc_not_attributed"
     elif good_rc != 0:
         first = "guest_exit_observed_but_host_exit_nonzero"
+    elif negative_guest_debug or negative_guest_svc:
+        first = "negative_control_guest_executed"
     elif not negative:
         first = "negative_loader_diagnostic_not_attributed"
     elif bad_rc != 1:
@@ -195,6 +200,8 @@ def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
     return {"original_controls_pass": accepted, "first_stop": first,
             "layout_records": classification, "original_debug_svc_records": debug,
             "exit_svc_records": exit_svc, "negative_meta_diagnostic": negative,
+            "negative_guest_debug_records": negative_guest_debug,
+            "negative_guest_kernel_svc_records": negative_guest_svc,
             "positive_rc": good_rc, "negative_rc": bad_rc,
             "positive_lifecycle": lifecycle(good),
             "negative_lifecycle": lifecycle(bad),
