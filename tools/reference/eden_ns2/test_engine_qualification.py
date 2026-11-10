@@ -100,6 +100,27 @@ class SmokeTests(unittest.TestCase):
         self.assertFalse(assess_silently(self.good, self.bad + self.good, 0, 1)
                          ["original_controls_pass"])
 
+    def test_malformed_meta_guest_execution_has_explicit_failure_reason(self):
+        result = assess_silently(self.good, self.good, 0, 0)
+        self.assertFalse(result["original_controls_pass"])
+        self.assertEqual(result["first_stop"], "negative_control_guest_executed")
+        self.assertEqual(result["negative_guest_debug_records"], 1)
+        self.assertEqual(result["negative_guest_kernel_svc_records"], 1)
+        self.assertEqual(result["negative_rc"], 0)
+
+    def test_attributed_loader_rejection_with_guest_execution_still_fails(self):
+        result = assess_silently(self.good, self.bad + self.good, 0, 1)
+        self.assertFalse(result["original_controls_pass"])
+        self.assertTrue(result["negative_meta_diagnostic"])
+        self.assertEqual(result["first_stop"], "negative_control_guest_executed")
+
+    def test_missing_negative_diagnostic_without_guest_execution_remains_distinct(self):
+        result = assess_silently(self.good, b"Frontend <Warning> unknown failure\\n", 0, 1)
+        self.assertFalse(result["original_controls_pass"])
+        self.assertEqual(result["first_stop"], "negative_loader_diagnostic_not_attributed")
+        self.assertEqual(result["negative_guest_debug_records"], 0)
+        self.assertEqual(result["negative_guest_kernel_svc_records"], 0)
+
     def test_redacted_lifecycle_reports_markers_not_log_content(self):
         raw = self.good + b"\nFrontend <Error> example.cpp:1:Start: private-token\n"
         report = lifecycle(raw)
