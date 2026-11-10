@@ -133,6 +133,38 @@ SOURCE_STAGE = (
 )
 
 
+# Do not persist host messages or paths. This taxonomy is diagnostic only:
+# strict source-attributed execution-failure checks remain unchanged.
+FAULT_SIGNATURES = (
+    ("assertion", re.compile(r"\\bassert(?:ion)?\\b", re.IGNORECASE)),
+    ("guest_exception", re.compile(r"ExceptionRaised", re.IGNORECASE)),
+    ("unmapped_instruction", re.compile(
+        r"Cannot execute instruction at unmapped address", re.IGNORECASE)),
+    ("segmentation_fault", re.compile(r"Segmentation fault", re.IGNORECASE)),
+    ("aborted", re.compile(r"\\bAborted\\b", re.IGNORECASE)),
+    ("address_sanitizer", re.compile(r"AddressSanitizer", re.IGNORECASE)),
+    ("undefined_behavior_sanitizer", re.compile(r"UndefinedBehaviorSanitizer", re.IGNORECASE)),
+    ("runtime_error", re.compile(r"runtime error:", re.IGNORECASE)),
+)
+
+
+def fault_signatures(lines: list[str]) -> dict:
+    """Return only allowlisted class and subsystem counts, never source text."""
+    classes = {name: 0 for name, _ in FAULT_SIGNATURES}
+    stages = {name: 0 for name, _ in SOURCE_STAGE}
+    stages["unclassified"] = 0
+    for line in lines:
+        matched = [name for name, pattern in FAULT_SIGNATURES if pattern.search(line)]
+        if not matched:
+            continue
+        stage = next((name for name, pattern in SOURCE_STAGE
+                      if pattern.search(line)), "unclassified")
+        stages[stage] = min(stages[stage] + 1, 100000)
+        for name in matched:
+            classes[name] = min(classes[name] + 1, 100000)
+    return {"categories": classes, "source_stages": stages}
+
+
 def lifecycle(raw: bytes) -> dict:
     """Lossy, redacted milestones for the first real modern-engine execution.
 
@@ -161,6 +193,7 @@ def lifecycle(raw: bytes) -> dict:
         "last_source_stage": last_stage,
         "fault_signature_seen": bool(exefs.EXECUTION_FAILURE.search(
             exefs.normalize(raw))),
+        "fault_signature_evidence": fault_signatures(lines),
         "raw_lines_preserved": False,
     }
 
@@ -193,6 +226,10 @@ def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
         first = "negative_loader_diagnostic_not_attributed"
     elif bad_rc != 1:
         first = "negative_loader_exit_mismatch"
+    elif exefs.EXECUTION_FAILURE.search(exefs.normalize(good)):
+        first = "positive_execution_fault_signature_observed"
+    elif exefs.EXECUTION_FAILURE.search(exefs.normalize(bad)):
+        first = "negative_execution_fault_signature_observed"
     elif not accepted:
         first = "strict_assessor_or_negative_control_rejected"
     else:
