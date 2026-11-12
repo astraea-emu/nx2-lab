@@ -129,6 +129,7 @@ SOURCE_STAGE = (
     ("core", re.compile(r"\bCore <(?:Info|Warning|Error|Critical)> ")),
     ("kernel", re.compile(r"\bKernel\.[^ ]+ <(?:Info|Warning|Error|Critical)> ")),
     ("guest_debug", re.compile(r"\bDebug\.Emulated <(?:Info|Warning|Error|Critical)> ")),
+    ("host_debug", re.compile(r"\bDebug <(?:Trace|Debug|Info|Warning|Error|Critical)> ")),
     ("gpu", re.compile(r"\b(?:Render|VideoCore|HW\.GPU)[^ ]* <(?:Info|Warning|Error|Critical)> ")),
 )
 
@@ -148,11 +149,24 @@ FAULT_SIGNATURES = (
 )
 
 
-def fault_signatures(lines: list[str]) -> dict:
-    """Return only allowlisted class and subsystem counts, never source text."""
+# The pinned logger trims source paths to repository-relative strings. Only
+# record a site when the source-built CLI generated a Debug/Critical record,
+# its message is shaped like the source-reviewed fail-soft assert macro, and
+# the named source file exists inside the exact reviewed checkout.
+PUBLIC_ASSERT_SITE = re.compile(
+    r"^(?:\[\s*\d+\.\d+\]\s+)?Debug <Critical> "
+    r"(?P<file>(?:common|core|audio_core|video_core|hid_core)/"
+    r"[A-Za-z0-9_./+-]+\.(?:cpp|c|h|hpp|inc)):"
+    r"(?P<line>[1-9][0-9]{0,6}):"
+)
+
+
+def fault_signatures(lines: list[str], source_root: Path | None = None) -> dict:
+    """Count allowlisted fault classes and verified public sites, not log text."""
     classes = {name: 0 for name, _ in FAULT_SIGNATURES}
     stages = {name: 0 for name, _ in SOURCE_STAGE}
     stages["unclassified"] = 0
+    sites: dict[str, int] = {}
     for line in lines:
         matched = [name for name, pattern in FAULT_SIGNATURES if pattern.search(line)]
         if not matched:
@@ -162,10 +176,39 @@ def fault_signatures(lines: list[str]) -> dict:
         stages[stage] = min(stages[stage] + 1, 100000)
         for name in matched:
             classes[name] = min(classes[name] + 1, 100000)
-    return {"categories": classes, "source_stages": stages}
+        if source_root is None or not re.search(r": assert\b", line, re.IGNORECASE):
+            continue
+        origin = PUBLIC_ASSERT_SITE.match(line)
+        if origin is None:
+            continue
+        relative = Path(origin["file"])
+        public = source_root / "src"
+        source = public / relative
+        if (".." in relative.parts or source.is_symlink() or not source.is_file()
+                or not source.resolve().is_relative_to(public.resolve())
+                or source.stat().st_size > 2_000_000):
+            continue
+        # A public source filename is not an attributable site unless its
+        # recorded line also exists in the exact pinned checkout.
+        with source.open("rb") as stream:
+            source_lines = sum(1 for _ in stream)
+        if int(origin["line"]) > source_lines:
+            continue
+        site = relative.as_posix() + ":" + origin["line"]
+        sites[site] = min(sites.get(site, 0) + 1, 100000)
+    return {
+        "categories": classes,
+        "source_stages": stages,
+        "reviewed_source_assert_sites": [
+            {"site": site, "count": count}
+            for site, count in sorted(sites.items())[:20]
+        ],
+        "source_assert_site_count_truncated": len(sites) > 20,
+        "raw_lines_preserved": False,
+    }
 
 
-def lifecycle(raw: bytes) -> dict:
+def lifecycle(raw: bytes, source_root: Path | None = None) -> dict:
     """Lossy, redacted milestones for the first real modern-engine execution.
 
     A count/last-stage hint is not a fault attribution or a compatibility pass.
@@ -193,12 +236,13 @@ def lifecycle(raw: bytes) -> dict:
         "last_source_stage": last_stage,
         "fault_signature_seen": bool(exefs.EXECUTION_FAILURE.search(
             exefs.normalize(raw))),
-        "fault_signature_evidence": fault_signatures(lines),
+        "fault_signature_evidence": fault_signatures(lines, source_root),
         "raw_lines_preserved": False,
     }
 
 
-def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
+def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int,
+                    source_root: Path | None = None) -> dict:
     with contextlib.redirect_stdout(io.StringIO()):
         accepted = exefs.assess(good, bad, good_rc, bad_rc)
     lines = exefs.source_lines(good)
@@ -240,8 +284,8 @@ def assess_silently(good: bytes, bad: bytes, good_rc: int, bad_rc: int) -> dict:
             "negative_guest_debug_records": negative_guest_debug,
             "negative_guest_kernel_svc_records": negative_guest_svc,
             "positive_rc": good_rc, "negative_rc": bad_rc,
-            "positive_lifecycle": lifecycle(good),
-            "negative_lifecycle": lifecycle(bad),
+            "positive_lifecycle": lifecycle(good, source_root),
+            "negative_lifecycle": lifecycle(bad, source_root),
             "log_adapter_or_runtime_unverified_if_failed": not accepted}
 
 
@@ -271,14 +315,14 @@ def main() -> int:
             help_rc, help_log, help_time = run(cli, None, root / "help", 10)
             good_rc, good, good_time = run(cli, a.valid.resolve(), root / "valid", a.seconds)
             bad_rc, bad, bad_time = run(cli, a.invalid.resolve(), root / "invalid", a.seconds)
-        result = assess_silently(good, bad, good_rc, bad_rc)
+        result = assess_silently(good, bad, good_rc, bad_rc, a.checkout)
         require(check_source() == original,
                 "Source changed during experiment")
         receipt = {"candidate": a.candidate, "commit": original["commit"],
                    "source_identity_verified": True, "cli_sha256": cli_hash,
                    "original_guest": inputs, "assessment": result,
                    "seconds": {"help": help_time, "valid": good_time, "invalid": bad_time},
-                   "frontend_help": {"rc": help_rc, "lifecycle": lifecycle(help_log),
+                   "frontend_help": {"rc": help_rc, "lifecycle": lifecycle(help_log, a.checkout),
                                      "natural_exit": help_rc == 0},
                    "raw_logs_retained": False,
                    "reviewed_exit_adapter_applied": a.reviewed_exit_adapter,
