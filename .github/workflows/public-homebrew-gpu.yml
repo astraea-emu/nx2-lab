@@ -105,3 +105,12 @@ jobs:
           if not captures:
               raise SystemExit("No completed present capture; graphics not qualified")
           PY
+
+      - name: Preserve only public-domain frame images
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deko-basic-present
+          path: ${{ runner.temp }}/frame-dump/*.png
+          if-no-files-found: warn
+          retention-days: 1
