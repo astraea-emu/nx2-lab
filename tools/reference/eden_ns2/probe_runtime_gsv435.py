@@ -81,8 +81,10 @@ def main() -> int:
         "open_proxy_result", "get_window_result", "get_aruid_result",
         "get_self_result", "get_gsv_result", "bootstrap_result",
         "bind_result", "ready_result", "image_init_result",
-        "image_formats_result", "open_nvdrv_result", "gpu_init_result",
-        "gpu_ready_result", "size_zero_result", "size_zero_lo",
+        "image_formats_result", "open_nvdrv_transport",
+        "open_nvdrv_header0", "open_nvdrv_header1",
+        "open_nvdrv_descriptor", "nvdrv_handle", "open_nvdrv_result",
+        "gpu_init_result", "gpu_ready_result", "size_zero_result", "size_zero_lo",
         "size_valid_result", "size_valid_lo",
     ))
     observed = {}
