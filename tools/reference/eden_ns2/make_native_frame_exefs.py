@@ -50,6 +50,7 @@ def _segment_layout(gpu: bool, animation: bool):
 def compile_frame_segments(
     tool_prefix: str = "aarch64-linux-gnu-", *, variant: int = 0,
     gpu: bool = False, clear_only: bool = False, animation: bool = False,
+    runtime_gsv435_smoke: bool = False,
 ) -> tuple[bytes, bytes, bytes]:
     """Link original ARM64 code and validate its three bounded PT_LOAD segments."""
     if variant not in (0, 1):
@@ -59,6 +60,9 @@ def compile_frame_segments(
     addresses, sizes = _segment_layout(gpu, animation)
     if animation and clear_only:
         raise ValueError("animation does not accept clear-only")
+    if type(runtime_gsv435_smoke) is not bool or (
+            runtime_gsv435_smoke and (not gpu or animation or clear_only)):
+        raise ValueError("runtime GSV smoke requires the static GPU triangle")
     with tempfile.TemporaryDirectory(prefix="nx2-frame-guest-") as temporary:
         directory = Path(temporary)
         obj, elf = directory / "guest.o", directory / "guest.elf"
@@ -74,6 +78,8 @@ def compile_frame_segments(
                          f"NX2_GPU_WORD_COUNT={GPFIFO_WORD_COUNT}", "--defsym",
                          f"NX2_GPU_CLEAR_ONLY={int(clear_only)}", "--defsym",
                          f"NX2_GPU_ANIMATION={int(animation)}"]
+        if runtime_gsv435_smoke:
+            arguments += ["--defsym", "NX2_RUNTIME_GSV435_SMOKE=1"]
         subprocess.run([tool_prefix + "as", "--defsym", f"NX2_FRAME_VARIANT={variant}",
                         *arguments, "-o", str(obj), str(ROOT / (source + ".S"))], check=True)
         subprocess.run([tool_prefix + "ld", "--build-id=none", "--defsym",
@@ -276,6 +282,8 @@ def main() -> int:
     parser.add_argument("--tool-prefix", default="aarch64-linux-gnu-")
     parser.add_argument("--variant", type=int, choices=(0, 1), default=0)
     parser.add_argument("--gpu-triangle", action="store_true")
+    parser.add_argument("--runtime-gsv435-smoke", action="store_true",
+                        help="probe modern engine size-zero response; not protocol qualification")
     parser.add_argument("--gpu-animation", action="store_true")
     parser.add_argument("--clear-only", action="store_true",
                         help="GPU clear control; requires --gpu-triangle")
@@ -283,8 +291,12 @@ def main() -> int:
     if args.gpu_triangle and args.gpu_animation:
         parser.error("select one GPU workload")
     gpu = args.gpu_triangle or args.gpu_animation
-    sections = compile_frame_segments(args.tool_prefix, variant=args.variant,
-                                      gpu=gpu, clear_only=args.clear_only, animation=args.gpu_animation)
+    if args.runtime_gsv435_smoke and (not args.gpu_triangle or args.clear_only):
+        parser.error("--runtime-gsv435-smoke requires --gpu-triangle without --clear-only")
+    sections = compile_frame_segments(
+        args.tool_prefix, variant=args.variant, gpu=gpu,
+        clear_only=args.clear_only, animation=args.gpu_animation,
+        runtime_gsv435_smoke=args.runtime_gsv435_smoke)
     nso = build_frame_nso(sections, gpu=gpu, animation=args.gpu_animation)
     npdm = build_extended_npdm()
     verify_frame_fixture(nso, npdm, args.variant, gpu=gpu,
@@ -317,6 +329,8 @@ def main() -> int:
                       f"sha256={hashlib.sha256(content).hexdigest()}")
     for name in names:
         print(f"NX2_FRAME_SOURCE name={name} sha256={hashlib.sha256((ROOT / name).read_bytes()).hexdigest()}")
+    if args.runtime_gsv435_smoke:
+        print("NX2_RUNTIME_GSV435_SMOKE_ONLY=1; strict count-zero rejection not tested")
     print("NX2_FRAME_FIXTURE_GENERATED; guest execution not attempted")
     return 0
 
