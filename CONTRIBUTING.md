@@ -1,8 +1,25 @@
 # Contributing
 
-Tie each change to a measured failure or an acceptance criterion in the
-[active plan](docs/PLAN.md). [Status](docs/STATUS.md) owns current results;
-[Evidence](docs/SOURCES.md) links the complete historical records.
+Work toward the [active milestone](docs/PLAN.md) and
+[game-capable runtime tracker](https://github.com/astraea-emu/nx2-lab/issues/50).
+[Status](docs/STATUS.md) distinguishes merged results from draft experiments;
+[Evidence](docs/SOURCES.md) preserves historical records.
+
+## Change and writing standards
+
+- One PR should solve one observable problem. Identify the before/after behavior,
+  affected platform, exact source revision, tests and remaining failures.
+- Prefer existing code, tests and documents over new wrappers or duplicate guides.
+  Keep interfaces small and names specific; remove only code proven redundant.
+- Report `pass`, `fail` and `not tested` separately. Do not imply game
+  compatibility from compilation, a synthetic capture or a successful exit.
+- Write plainly. Use numbers and direct comparisons rather than marketing,
+  repeated disclaimers, generic summaries or unverified performance claims.
+- Put routine investigation in its issue. Change [Plan](docs/PLAN.md) when the
+  decision changes; update [Status](docs/STATUS.md) when evidence changes.
+- Keep licensed upstream emulator code in a separate full-engine repository.
+  Preserve Git history, authorship and third-party notices. NX2 Lab owns
+  independent fixtures and regression tooling, not a vendored engine.
 
 ## Local checks
 

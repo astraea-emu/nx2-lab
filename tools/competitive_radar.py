@@ -115,7 +115,7 @@ def render(names, state, old, timestamp):
     lines += [
         "",
         "**Changed revisions:** " + str(changed) + ". Review relevant source diffs, reproducibility and"
-        " negative tests before proposing a change to the [primary gate](https://github.com/astraea-emu/nx2-lab/issues/21).",
+        " negative tests before proposing a change to the [runtime milestone](https://github.com/astraea-emu/nx2-lab/issues/50).",
         "",
         "**Not monitored:** Eden's external Git server, private forks, non-GitHub"
         " research, security disclosures, actual game execution or graphics correctness.",

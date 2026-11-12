@@ -1,14 +1,35 @@
 # Status
 
-**Verified 2026-11-01. Production-engine adoption: HOLD.**
+## Current state — November 11, 2026
 
-NX2 is useful as a regression lab. Its own `nx2lab` executable is a bounded
-CPU/memory oracle; the guest results below belong to separately built engines.
-An original guest now draws a triangle with native GPU commands and original
-vertex/fragment shaders. One reproducible Linux command checks both colours,
-the clear-only control and resource cleanup. Both reviewed engine revisions
-preserve these results. The [active milestone](PLAN.md) is an original animated
-guest with repeated submission and checked buffer reuse.
+`main` at `b244712e092ff42d8445242425a19160944d7a38` is **NX2 Lab**,
+not a standalone Switch 2 emulator. The active goal is a full game-capable
+runtime built on a measured maintained foundation; see [Plan](PLAN.md) and
+[issue #50](https://github.com/astraea-emu/nx2-lab/issues/50).
+
+Later work is preserved in **draft, unmerged** pull requests:
+
+| Work | Latest observed result | Open gate |
+| --- | --- | --- |
+| [#46 — GPU animation](https://github.com/astraea-emu/nx2-lab/pull/46) | Four-frame original GPU output verified in controlled runs | Intermittent post-guest-exit host failure; HOLD |
+| [#47–#48 — modern engines](https://github.com/astraea-emu/nx2-lab/pulls) | Source-built Eglantine/Lichii execute original ARM64 and capture pixel-matched images | Overall native protocol and cleanup qualification |
+| [#49 — NPDM and diagnostics](https://github.com/astraea-emu/nx2-lab/pull/49) | Both engines reject malformed META before guest execution; original image variants pass exact-pixel tests | Combined ExeFS run fails on two host crypto assertions at `core/crypto/aes_util.cpp:97` per run; source traced, cause not yet established |
+
+At [PR #49 head `57575bc5`](https://github.com/astraea-emu/nx2-lab/commit/57575bc5932d9cf991a64296b1623d8dc97a31f7),
+general CI passed 400 offline Python tests (16 skipped), Linux, Windows and
+macOS builds, and sanitizers. The
+[modern-engine runtime workflow](https://github.com/astraea-emu/nx2-lab/actions/runs/43136579956)
+**failed on both engines**. A green general CI matrix does not override that
+result. The modern image-size negative and true display finalization also
+remain unresolved. These results do not establish game compatibility.
+
+## Merged baseline — verified November 1, 2026
+
+The `nx2lab` executable is a bounded CPU/memory oracle. Its reference
+workloads run in separately built Eden engines: an original guest renders two
+native GPU triangle colours plus a clear-only control, with independent pixel
+comparison and natural exit. Animation was the next milestone at that time;
+[the plan](PLAN.md) now prioritizes a complete emulator runtime.
 
 ## Measured results
 
@@ -74,7 +95,11 @@ failure, source-guarded console-record locking repair and concurrency regression
 applied changes, raw-report digests and earlier failures. Dated proposals
 remain historical; [Plan](PLAN.md) defines the current next step.
 
-## Limits and blockers
+## Limits of the merged baseline
+
+The following limitations describe the November 1 `main` baseline. Draft
+experiments above have additional results but are not merged or release-qualified.
+
 
 - **Graphics:** one untextured triangle and its colour edit are verified on
   Linux/Lavapipe. Repeated frames and buffer reuse, textures, two DMA contracts,

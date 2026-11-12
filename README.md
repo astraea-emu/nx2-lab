@@ -1,13 +1,26 @@
 # NX2 Lab
 
-A research lab for Switch 2 emulation: original guest workloads, repeatable
-external-runtime tests and a small AArch64 CPU/memory correctness oracle.
+Original ARM64 workloads, CPU/memory checks and reproducible external-emulator
+tests for Nintendo Switch 2 research. `nx2lab` is a small test executable,
+**not a game-capable Switch 2 emulator**.
 
-Original ARM64 guests complete checked IPC and execute original vertex and
-fragment shaders through a pinned Eden build on Linux. Two triangle colours
-match every expected captured pixel; a clear-only control fails both triangle
-references. All three guests exit naturally. NX2 has no developer SDK or
-verified game compatibility.
+## Direction
+
+Our goal is a full NX2 emulator with leading game compatibility, correctness,
+stability, performance and platform support. Rather than rebuild an entire
+emulator here, we will qualify a maintained GPL engine, develop a separate
+full-runtime fork and use this lab to detect regressions and measure improvements.
+
+[Current plan](docs/PLAN.md) · [Runtime milestone](https://github.com/astraea-emu/nx2-lab/issues/50) · [Measured status](docs/STATUS.md)
+
+## Verified baseline
+
+On Linux, original ARM64 guests execute checked IPC and native GPU shaders
+through a pinned external Eden build. Two triangle colours and a clear-only
+control pass independent pixel checks. These are original test workloads,
+not game compatibility results. See [Status](docs/STATUS.md) for the dated
+evidence and [draft experiments](https://github.com/astraea-emu/nx2-lab/pulls)
+for unmerged modern-engine work.
 
 ## Build and run
 
