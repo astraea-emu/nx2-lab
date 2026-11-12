@@ -230,7 +230,7 @@ class NativeGpuFixtureTests(unittest.TestCase):
     def test_modern_gsv_smoke_preserves_original_gpu_inputs(self):
         prefix = os.environ.get("NX2_AARCH64_PREFIX", "aarch64-linux-gnu-")
         probe = compile_frame_segments(
-            prefix, variant=0, gpu=True, runtime_gsv435_smoke=True)
+            prefix, variant=0, gpu=True, runtime_gsv_smoke=True)
         original = self.fixtures[0, False]
         self.assertNotEqual(probe[0], original[0])
         self.assertEqual(probe[1:], original[1:])
@@ -238,9 +238,9 @@ class NativeGpuFixtureTests(unittest.TestCase):
         for options in ({}, {"gpu": False}, {"gpu": True, "animation": True},
                         {"gpu": True, "clear_only": True}):
             with self.subTest(options=options), self.assertRaises(ValueError):
-                compile_frame_segments(prefix, runtime_gsv435_smoke=True, **options)
+                compile_frame_segments(prefix, runtime_gsv_smoke=True, **options)
         with self.assertRaises(ValueError):
-            compile_frame_segments(prefix, gpu=True, runtime_gsv435_smoke=1)
+            compile_frame_segments(prefix, gpu=True, runtime_gsv_smoke=1)
 
     def test_rehashed_commands_shaders_vertices_and_schema_corruption_fail(self):
         for offset in (self.names, self.inputs, self.inputs + 0x1000,
