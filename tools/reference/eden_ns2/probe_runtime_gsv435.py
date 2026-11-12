@@ -39,7 +39,7 @@ def main() -> int:
         subprocess.run(
             [sys.executable, str(ROOT / "make_native_frame_exefs.py"),
              "--output", str(guest), "--tool-prefix", args.tool_prefix,
-             "--gpu-triangle", "--runtime-gsv435-smoke"],
+             "--gpu-triangle", "--runtime-gsv-smoke"],
             check=True, stdout=stream, stderr=subprocess.STDOUT,
         )
 
@@ -93,7 +93,7 @@ def main() -> int:
         if field in diagnostic_fields and field not in observed:
             observed[field] = int(value, 16)
     report = {
-        "mode": "diagnostic_gsv435_only",
+        "mode": "diagnostic_gsv_only",
         "original_guest_status": observed,
         "emulator_exit": completed.returncode,
         "log_bounded": len(raw) <= MAX_LOG,
