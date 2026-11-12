@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -74,8 +75,24 @@ def main() -> int:
     if engine_log.is_file():
         with engine_log.open("rb") as stream:
             raw += stream.read(MAX_LOG + 1 - min(len(raw), MAX_LOG + 1))
+    # Read only bounded, source-owned guest fields; never publish raw host logs.
+    diagnostic_fields = frozenset((
+        "fail_step", "connect_rc", "sm_init_result", "get_applet_result",
+        "open_proxy_result", "get_window_result", "get_aruid_result",
+        "get_self_result", "get_gsv_result", "bootstrap_result",
+        "bind_result", "ready_result", "image_init_result",
+        "image_formats_result", "open_nvdrv_result", "gpu_init_result",
+        "gpu_ready_result", "size_zero_result", "size_zero_lo",
+        "size_valid_result", "size_valid_lo",
+    ))
+    observed = {}
+    for name, value in re.findall(rb"NX2_FRAME ([a-z][a-z0-9_]*)=([0-9a-f]{8})", raw):
+        field = name.decode("ascii")
+        if field in diagnostic_fields and field not in observed:
+            observed[field] = int(value, 16)
     report = {
         "mode": "diagnostic_gsv435_only",
+        "original_guest_status": observed,
         "emulator_exit": completed.returncode,
         "log_bounded": len(raw) <= MAX_LOG,
         "guest_sha256": hashlib.sha256((guest / "main").read_bytes()).hexdigest(),
