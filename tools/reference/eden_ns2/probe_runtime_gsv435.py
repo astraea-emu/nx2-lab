@@ -45,7 +45,7 @@ def main() -> int:
     config = output / "sdl-config.ini"
     config.write_text(
         GPU_CONFIG + FLUSH_CONFIG +
-        "[Audio]\\noutput_engine\\\\default=false\\noutput_engine=3\\n",
+        "[Audio]\noutput_engine\\default=false\noutput_engine=3\n",
         encoding="utf-8")
     home = output / "home"
     for name in ("config", "data", "cache", "runtime"):
