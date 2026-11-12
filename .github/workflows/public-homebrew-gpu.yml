@@ -14,6 +14,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
+      - name: Check out NX2 Lab verifier
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
       - name: Check out public-domain Switch example
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -46,7 +51,7 @@ jobs:
       - name: Run a bounded software-Vulkan homebrew trial
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers xvfb xauth
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers xvfb xauth python3-pil
           icds=(/usr/share/vulkan/icd.d/lvp*.json)
           test "${#icds[@]}" -eq 1
           mkdir -p "$RUNNER_TEMP/home"/{config,data,cache,runtime}
@@ -101,10 +106,19 @@ jobs:
           with (Path(os.environ["GITHUB_STEP_SUMMARY"])).open("a") as out:
               out.write("### Public-domain homebrew GPU trial\n\n")
               out.write("~~~json\n" + json.dumps(result, indent=2) + "\n~~~\n")
-              out.write("\nThis tests upstream Lichii, not the NX2 fork; no pixel or game correctness claim.\n")
+              out.write("\nThis tests upstream Lichii, not the NX2 fork; RGB verification runs separately.\n")
           if not captures:
               raise SystemExit("No completed present capture; graphics not qualified")
           PY
+
+      - name: Verify exact triangle RGB against an independent source oracle
+        run: |
+          python3 tools/reference/homebrew/verify_deko_basic.py "$RUNNER_TEMP/frame-dump" \
+            | tee "$RUNNER_TEMP/pixels.json"
+          echo "### Exact RGB verification (Switch 1 homebrew only)" >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/pixels.json" >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Preserve only public-domain frame images
         if: always()
