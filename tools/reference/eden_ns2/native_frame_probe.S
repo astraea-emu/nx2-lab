@@ -13,6 +13,12 @@
 .ifndef NX2_GPU_ANIMATION
     .set NX2_GPU_ANIMATION, 0
 .endif
+.ifndef NX2_RUNTIME_GSV435_SMOKE
+    .set NX2_RUNTIME_GSV435_SMOKE, 0
+.endif
+.if NX2_RUNTIME_GSV435_SMOKE && !NX2_GPU_PROBE
+    .error "modern image-size smoke requires a GPU guest"
+.endif
 .if NX2_GPU_ANIMATION && !NX2_GPU_PROBE
     .error "animation requires the GPU guest"
 .endif
@@ -467,8 +473,15 @@ _start:
     prepare size_zero_request
     send 5, size_zero
     capture_u64 size_zero
+// Diagnostic only: modern Lichii coerces a zero count to one image.
+// The original protocol rejection remains the default conformance test.
+.if NX2_RUNTIME_GSV435_SMOKE
+    tipc_check size_zero, 435, 0, 3
+    check_u64 size_zero, 8192
+.else
     tipc_check size_zero, 435, 0x100f3, 3
     check_u64 size_zero, 0
+.endif
     step 18
     prepare size_valid_request
     send 5, size_valid
