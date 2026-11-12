@@ -1,0 +1,107 @@
+name: Public homebrew GPU baseline
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/public-homebrew-gpu.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deko-basic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out public-domain Switch example
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          repository: switchbrew/switch-examples
+          ref: 669786898205b7beb25ff1731e72982e6d0397d3
+          path: switch-examples
+          persist-credentials: false
+
+      - name: Build standard deko3d homebrew
+        run: |
+          test "$(git -C switch-examples rev-parse HEAD)" = 669786898205b7beb25ff1731e72982e6d0397d3
+          docker pull devkitpro/devkita64:latest
+          docker image inspect devkitpro/devkita64:latest --format '{{.Id}}' > "$RUNNER_TEMP/toolchain.txt"
+          docker run --rm --network none \
+            -v "$GITHUB_WORKSPACE/switch-examples:/source" \
+            -w /source/graphics/deko3d/deko_basic \
+            devkitpro/devkita64:latest make -j2
+          test -s switch-examples/graphics/deko3d/deko_basic/deko_basic.nro
+
+      - name: Obtain verified upstream emulator binary
+        run: |
+          curl -fL --retry 2 --max-time 240 \
+            -o "$RUNNER_TEMP/lichii.tar.gz" \
+            https://github.com/zortos293/Lichii/releases/download/build-160/lichii-linux-x86_64.tar.gz
+          echo "8808893f08062c9a450234a3988eb2291dcda9d686a4d7e8780c0b6b6ec21962  $RUNNER_TEMP/lichii.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/upstream"
+          tar -xzf "$RUNNER_TEMP/lichii.tar.gz" -C "$RUNNER_TEMP/upstream"
+          test -x "$RUNNER_TEMP/upstream/lichii/eden-cli"
+
+      - name: Run a bounded software-Vulkan homebrew trial
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers xvfb xauth
+          icds=(/usr/share/vulkan/icd.d/lvp*.json)
+          test "${#icds[@]}" -eq 1
+          mkdir -p "$RUNNER_TEMP/home"/{config,data,cache,runtime}
+          chmod 700 "$RUNNER_TEMP/home/runtime"
+          printf '[Renderer]\nbackend=1\nbackend\\default=false\n[Audio]\noutput_engine=3\noutput_engine\\default=false\n' > "$RUNNER_TEMP/runtime.ini"
+          export HOME="$RUNNER_TEMP/home" XDG_CONFIG_HOME="$RUNNER_TEMP/home/config"
+          export XDG_DATA_HOME="$RUNNER_TEMP/home/data" XDG_CACHE_HOME="$RUNNER_TEMP/home/cache"
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/home/runtime"
+          export VK_DRIVER_FILES="${icds[0]}" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy
+          export EDEN_NX2_FRAME_DUMP="$RUNNER_TEMP/frame-dump" EDEN_NX2_FRAME_DUMP_AT=1f
+          set +e
+          timeout --signal=TERM --kill-after=3s 18s \
+            xvfb-run -a -s '-screen 0 1920x1080x24 -nolisten tcp' \
+            "$RUNNER_TEMP/upstream/lichii/eden-cli" --config "$RUNNER_TEMP/runtime.ini" \
+            --game "$GITHUB_WORKSPACE/switch-examples/graphics/deko3d/deko_basic/deko_basic.nro" \
+            > "$RUNNER_TEMP/console.log" 2>&1
+          printf '%s\n' "$?" > "$RUNNER_TEMP/exit.txt"
+          exit 0
+
+      - name: Report captured graphics evidence, not gameplay compatibility
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          manifest = root / "frame-dump/manifest.jsonl"
+          records = []
+          if manifest.is_file() and manifest.stat().st_size <= 2_000_000:
+              for line in manifest.read_text().splitlines():
+                  if line.strip():
+                      records.append(json.loads(line))
+          captures = [r for r in records if r.get("kind") == "present"
+                      and isinstance(r.get("png"), str)
+                      and (root / "frame-dump" / r["png"]).is_file()]
+          result = {
+              "scope": "Switch 1 homebrew (not Switch 2 game compatibility)",
+              "upstream": "zortos293/Lichii build-160 2eb5f081c8",
+              "example": "switchbrew/switch-examples 669786898205 deko_basic",
+              "nro_sha256": hashlib.sha256(
+                  (Path(os.environ["GITHUB_WORKSPACE"]) /
+                   "switch-examples/graphics/deko3d/deko_basic/deko_basic.nro").read_bytes()
+              ).hexdigest(),
+              "process_exit": int((root / "exit.txt").read_text().strip()),
+              "frame_dump_present_records": len(captures),
+              "pixel_correctness_verified": False,
+              "input_verified": False,
+          }
+          print(json.dumps(result, sort_keys=True))
+          with (Path(os.environ["GITHUB_STEP_SUMMARY"])).open("a") as out:
+              out.write("### Public-domain homebrew GPU trial\n\n")
+              out.write("~~~json\n" + json.dumps(result, indent=2) + "\n~~~\n")
+              out.write("\nThis tests upstream Lichii, not the NX2 fork; no pixel or game correctness claim.\n")
+          if not captures:
+              raise SystemExit("No completed present capture; graphics not qualified")
+          PY
