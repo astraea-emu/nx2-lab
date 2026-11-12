@@ -358,9 +358,9 @@ field_names:
     mov w7, #0x80000001
     cmp w2, w7
     b.ne failure
-    // Modern nx2:gsv 1402 returns a copied handle (descriptor 0x02).
-    // Preserve the original moved-handle requirement in strict mode.
-.if NX2_RUNTIME_GSV_SMOKE && (\command == 1402)
+    // Modern GSV 1402 (NVDRV) and 305 (VI2) return copied handles.
+    // Preserve the archived moved-handle check outside this diagnostic.
+.if NX2_RUNTIME_GSV_SMOKE
     cmp w3, #0x02
 .else
     cmp w3, #0x20
