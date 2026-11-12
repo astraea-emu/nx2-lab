@@ -13,10 +13,10 @@
 .ifndef NX2_GPU_ANIMATION
     .set NX2_GPU_ANIMATION, 0
 .endif
-.ifndef NX2_RUNTIME_GSV435_SMOKE
-    .set NX2_RUNTIME_GSV435_SMOKE, 0
+.ifndef NX2_RUNTIME_GSV_SMOKE
+    .set NX2_RUNTIME_GSV_SMOKE, 0
 .endif
-.if NX2_RUNTIME_GSV435_SMOKE && !NX2_GPU_PROBE
+.if NX2_RUNTIME_GSV_SMOKE && !NX2_GPU_PROBE
     .error "modern image-size smoke requires a GPU guest"
 .endif
 .if NX2_GPU_ANIMATION && !NX2_GPU_PROBE
@@ -358,7 +358,13 @@ field_names:
     mov w7, #0x80000001
     cmp w2, w7
     b.ne failure
+    // Modern nx2:gsv 1402 returns a copied handle (descriptor 0x02).
+    // Preserve the original moved-handle requirement in strict mode.
+.if NX2_RUNTIME_GSV_SMOKE && (\command == 1402)
+    cmp w3, #0x02
+.else
     cmp w3, #0x20
+.endif
     b.ne failure
     admit \slot
     cbnz w5, failure
@@ -475,7 +481,7 @@ _start:
     capture_u64 size_zero
 // Diagnostic only: modern Lichii coerces a zero count to one image.
 // The original protocol rejection remains the default conformance test.
-.if NX2_RUNTIME_GSV435_SMOKE
+.if NX2_RUNTIME_GSV_SMOKE
     tipc_check size_zero, 435, 0, 3
     check_u64 size_zero, 8192
 .else
