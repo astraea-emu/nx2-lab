@@ -43,7 +43,10 @@ def main() -> int:
         )
 
     config = output / "sdl-config.ini"
-    config.write_text(GPU_CONFIG + FLUSH_CONFIG, encoding="utf-8")
+    config.write_text(
+        GPU_CONFIG + FLUSH_CONFIG +
+        "[Audio]\\noutput_engine\\\\default=false\\noutput_engine=3\\n",
+        encoding="utf-8")
     home = output / "home"
     for name in ("config", "data", "cache", "runtime"):
         (home / name).mkdir(parents=True, exist_ok=True)
@@ -65,10 +68,12 @@ def main() -> int:
     with log.open("wb") as stream:
         completed = subprocess.run(command, cwd=output, env=env,
                                    stdout=stream, stderr=subprocess.STDOUT)
-    raw = log.read_bytes()
+    with log.open("rb") as stream:
+        raw = stream.read(MAX_LOG + 1)
     engine_log = home / "data/lichii/log/eden_log.txt"
-    if engine_log.is_file() and engine_log.stat().st_size <= MAX_LOG:
-        raw += engine_log.read_bytes()
+    if engine_log.is_file():
+        with engine_log.open("rb") as stream:
+            raw += stream.read(MAX_LOG + 1 - min(len(raw), MAX_LOG + 1))
     report = {
         "mode": "diagnostic_gsv435_only",
         "emulator_exit": completed.returncode,
