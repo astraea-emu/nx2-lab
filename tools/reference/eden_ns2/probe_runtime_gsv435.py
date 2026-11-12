@@ -91,8 +91,9 @@ def main() -> int:
     (output / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, sort_keys=True), flush=True)
     return 0 if (report["log_bounded"] and report["guest_started"] and
-                 not report["guest_failed"] and not report["forced_timeout"] and
-                 completed.returncode == 0) else 1
+                 report["gpu_started"] and report["gpu_submitted"] and
+                 report["guest_complete"] and not report["guest_failed"] and
+                 not report["forced_timeout"] and completed.returncode == 0) else 1
 
 
 if __name__ == "__main__":
