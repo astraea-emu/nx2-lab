@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  deko-basic:
+  space-game:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -27,6 +27,7 @@ jobs:
           test "$(git -C space-game rev-parse HEAD)" = d09ff27498a0baa2d4ab085ef3b4e3a9bc2fa75c
           docker pull devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282
           docker run --rm --network none \
+            -e DEVKITPRO=/opt/devkitpro -e DEVKITA64=/opt/devkitpro/devkitA64 \
             -v "$GITHUB_WORKSPACE/space-game:/source" -w /source \
             devkitpro/devkita64@sha256:1fc388c3a0d34bd2045a6dadcb1020e069d5f876a187fd705de14b4440c00282 \
             make -f Makefile.libnx -j2 \
