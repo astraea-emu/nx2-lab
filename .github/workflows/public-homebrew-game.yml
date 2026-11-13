@@ -58,6 +58,8 @@ jobs:
           export XDG_DATA_HOME="$RUNNER_TEMP/home/data" XDG_CACHE_HOME="$RUNNER_TEMP/home/cache"
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/home/runtime"
           export VK_DRIVER_FILES="${icds[0]}" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy
+          # SDL scancode A (4) maps to emulated controller A; the game uses it at "Start Game".
+          export EDEN_NX2_KEY_SCRIPT="3:4,3.5:-4"
           export EDEN_NX2_FRAME_DUMP="$RUNNER_TEMP/frame-dump" EDEN_NX2_FRAME_DUMP_AT=1f
           set +e
           xvfb-run -a -s '-screen 0 1920x1080x24 -nolisten tcp' \
@@ -113,9 +115,11 @@ jobs:
               "window_create_failed": b"window could not be created" in log,
               "guest_program_log_seen": b"initialized SDL" in log,
               "renderer_frame_dump_armed": b"Frame dump armed" in log,
+              "frontend_a_press_logged": b"Key script: press key 4" in log,
           }
           report = {
               "scope": "MIT-licensed Switch 1 SDL2 space game; upstream baseline only",
+              "input_attempt": "one emulated A press at 3.0 s, released at 3.5 s; gameplay not assumed",
               "desktop": desktop,
               "startup_flags": startup_flags,
               "log_bounded": len(log) <= 4 * 1024 * 1024,
